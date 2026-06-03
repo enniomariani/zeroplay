@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <libavutil/version.h>
+#include <libavcodec/avcodec.h>
 
 int demux_open(DemuxContext *ctx, const char *filename,
                Queue *video_queue, Queue *audio_queue,
@@ -105,6 +106,30 @@ int demux_open(DemuxContext *ctx, const char *filename,
             fprintf(stderr, "demux: no video stream found\n");
             return -1;
         }
+    }
+
+    /* Check if the codec-level and the codec-profile are supported by the V4L2 M2M decoder*/
+    AVCodecParameters *par = ctx->fmt_ctx->streams[ctx->video_stream_idx]->codecpar;
+
+    const AVCodec *codec = avcodec_find_decoder(par->codec_id);
+
+    fprintf(stderr, "demux: Codec profile — %s\n", av_get_profile_name(codec, par->profile));
+    fprintf(stderr, "demux: Codec level   — %d.%d\n", par->level / 10, par->level % 10);
+
+    if (par->level > 42) {
+         fprintf(stderr, "demux: WARNING — Codec-level %d.%d may not be supported. "
+                "Highest supported level is 4.2\n", par->level / 10, par->level % 10);
+    }
+
+    if (! (
+        par->profile == FF_PROFILE_H264_BASELINE ||
+        par->profile == FF_PROFILE_H264_CONSTRAINED_BASELINE ||
+        par->profile == FF_PROFILE_H264_MAIN ||
+        par->profile == FF_PROFILE_H264_EXTENDED ||
+        par->profile == FF_PROFILE_H264_HIGH
+    )) {
+         fprintf(stderr, "demux: WARNING — Codec-profile %s may not be supported. "
+                    "Supported profiles: Baseline, Constrained Baseline, Main, Extended, High (8Bit/4:2:0)\n", av_get_profile_name(codec, par->profile));
     }
 
     /* Duration in microseconds */
