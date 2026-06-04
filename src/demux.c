@@ -113,8 +113,8 @@ int demux_open(DemuxContext *ctx, const char *filename,
 
     const AVCodec *codec = avcodec_find_decoder(par->codec_id);
 
-    fprintf(stderr, "demux: Codec profile — %s\n", av_get_profile_name(codec, par->profile));
-    fprintf(stderr, "demux: Codec level   — %d.%d\n", par->level / 10, par->level % 10);
+    vlog("demux: Codec profile — %s\n", av_get_profile_name(codec, par->profile));
+    vlog("demux: Codec level   — %d.%d\n", par->level / 10, par->level % 10);
 
     if (par->level > 42) {
          fprintf(stderr, "demux: WARNING — Codec-level %d.%d may not be supported. "
