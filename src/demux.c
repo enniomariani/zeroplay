@@ -113,7 +113,11 @@ int demux_open(DemuxContext *ctx, const char *filename,
 
     const AVCodec *codec = avcodec_find_decoder(par->codec_id);
 
-    vlog("demux: Codec profile — %s\n", av_get_profile_name(codec, par->profile));
+    if(codec)
+        vlog("demux: Codec profile — %s\n", av_get_profile_name(codec, par->profile));
+    else
+        vlog("demux: Profile — %d (no decoder found)\n", par->profile);
+
     vlog("demux: Codec level   — %d.%d\n", par->level / 10, par->level % 10);
 
     if (par->level > 42) {
@@ -122,14 +126,18 @@ int demux_open(DemuxContext *ctx, const char *filename,
     }
 
     if (! (
-        par->profile == FF_PROFILE_H264_BASELINE ||
-        par->profile == FF_PROFILE_H264_CONSTRAINED_BASELINE ||
-        par->profile == FF_PROFILE_H264_MAIN ||
-        par->profile == FF_PROFILE_H264_EXTENDED ||
-        par->profile == FF_PROFILE_H264_HIGH
+        par->profile == AV_PROFILE_H264_BASELINE ||
+        par->profile == AV_PROFILE_H264_CONSTRAINED_BASELINE ||
+        par->profile == AV_PROFILE_H264_MAIN ||
+        par->profile == AV_PROFILE_H264_EXTENDED ||
+        par->profile == AV_PROFILE_H264_HIGH
     )) {
-         fprintf(stderr, "demux: WARNING — Codec-profile %s may not be supported. "
-                    "Supported profiles: Baseline, Constrained Baseline, Main, Extended, High (8Bit/4:2:0)\n", av_get_profile_name(codec, par->profile));
+        if(codec)
+             fprintf(stderr, "demux: WARNING — Codec-profile %s may not be supported. "
+                        "Supported profiles: Baseline, Constrained Baseline, Main, Extended, High (8Bit/4:2:0)\n", av_get_profile_name(codec, par->profile));
+        else
+             fprintf(stderr, "demux: WARNING — Codec-profile %d may not be supported (no decoder found). "
+                                     "Supported profiles: Baseline, Constrained Baseline, Main, Extended, High (8Bit/4:2:0)\n", par->profile);
     }
 
     /* Duration in microseconds */
