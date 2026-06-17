@@ -1201,7 +1201,30 @@ int main(int argc, char *argv[])
             }
         }
 
-        if (all_eos) break;
+        if (all_eos) {
+            /* Drain and display any remaining decoded frames before exiting */
+            for (int i = 0; i < opened; i++) {
+                PlayerContext *p = &players[i];
+                if (p->image_mode) continue;
+                while (1) {
+                    if (p->held_frame) {
+                        int64_t due = p->wall_start + p->held_frame->pts_us;
+                        int64_t now = now_us();
+                        if (due > now) sleep_us(due - now);
+                        drm_present(&drm, p->output_idx, p->held_frame);
+                        if (p->prev_frame)
+                            vdec_requeue_frame(&p->vdec, p->prev_frame);
+                        p->prev_frame  = p->held_frame;
+                        p->held_frame  = NULL;
+                    }
+                    void *item = NULL;
+                    int rc = queue_trypop(&p->frame_queue, &item);
+                    if (rc <= 0) break;
+                    p->held_frame = (DecodedFrame *)item;
+                }
+            }
+            break;
+        }
 
         if (next_due != INT64_MAX) {
             int64_t sl = next_due - now_us();

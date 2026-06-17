@@ -199,6 +199,8 @@ void demux_run(DemuxContext *ctx)
 
     while (av_read_frame(ctx->fmt_ctx, pkt) >= 0) {
         if (pkt->stream_index == ctx->video_stream_idx) {
+            pkt->pts == AV_NOPTS_VALUE ? -1.0
+            : pkt->pts * av_q2d(ctx->fmt_ctx->streams[ctx->video_stream_idx]->time_base);
             AVPacket *queued = av_packet_alloc();
             if (!queued) { av_packet_unref(pkt); continue; }
             av_packet_move_ref(queued, pkt);
