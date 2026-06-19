@@ -190,7 +190,7 @@ static int alsa_setup_device(AudioContext *ctx, const char *dev_name,
     snd_pcm_hw_params_get_channels(hw_params, &actual_ch);
     snd_pcm_hw_params_get_rate(hw_params, &actual_rate, NULL);
 
-    fprintf(stderr, "audio: ALSA opened — device=%s rate=%u ch=%u fmt=%s "
+    vlog("audio: ALSA opened — device=%s rate=%u ch=%u fmt=%s "
             "buffer=%lu period=%lu\n",
             dev_name, actual_rate, actual_ch,
             snd_pcm_format_name(actual_fmt),
@@ -285,7 +285,7 @@ int audio_open(AudioContext *ctx, AVStream *stream,
                 snd_pcm_close(test);
                 strncpy(ctx->device, try_devices[i],
                         sizeof(ctx->device) - 1);
-                fprintf(stderr, "audio: selected device '%s'\n",
+                vlog("audio: selected device '%s'\n",
                         ctx->device);
                 break;
             }
@@ -329,7 +329,7 @@ int audio_open(AudioContext *ctx, AVStream *stream,
         return -1;
     }
 
-    fprintf(stderr, "audio: decoder opened — %s profile=%d codecpar_rate=%d "
+    vlog("audio: decoder opened — %s profile=%d codecpar_rate=%d "
             "codec_ctx_rate=%d ch=%d (fmt=%s)\n",
             codec->name, ctx->codec_ctx->profile,
             ctx->sample_rate, ctx->codec_ctx->sample_rate,
@@ -425,7 +425,7 @@ void audio_run(AudioContext *ctx)
     int64_t prev_pts       = AV_NOPTS_VALUE;
     int     prev_nb_samples = 0;
 
-    fprintf(stderr, "audio: playback thread started\n");
+    vlog("audio: playback thread started\n");
 
     while (1) {
         /* Block while paused */
@@ -483,8 +483,7 @@ void audio_run(AudioContext *ctx)
 
             /* Log first decoded frame for diagnostics */
             if (total_frames == 1) {
-                fprintf(stderr,
-                    "audio: first decoded frame — fmt=%s rate=%d ch=%d "
+                vlog("audio: first decoded frame — fmt=%s rate=%d ch=%d "
                     "samples=%d (codec=%d alsa=%d)\n",
                     av_get_sample_fmt_name(frame->format),
                     frame->sample_rate,
@@ -649,9 +648,14 @@ void audio_run(AudioContext *ctx)
         }
     }
 
-    fprintf(stderr, "audio: thread exiting (decoded=%d errors=%d "
-            "frames_written=%lld)\n",
-            total_frames, total_errors, ctx->frames_written);
+    if (total_errors)
+        fprintf(stderr, "audio: thread exiting (decoded=%d errors=%d "
+                "frames_written=%lld)\n",
+                total_frames, total_errors, ctx->frames_written);
+    else
+        vlog("audio: thread exiting (decoded=%d errors=%d "
+                "frames_written=%lld)\n",
+                total_frames, total_errors, ctx->frames_written);
     av_frame_free(&frame);
 }
 

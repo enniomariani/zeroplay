@@ -6,6 +6,7 @@
 #include <dirent.h>
 #include <time.h>
 #include "playlist.h"
+#include "log.h"
 
 #define YOUTUBE_DEFAULT_QUALITY 480
 
@@ -268,7 +269,7 @@ int playlist_open(Playlist *pl, const char *path, const char *path_audio,
 
     if (shuffle) shuffle_items(pl);
 
-    fprintf(stderr, "playlist: %d item(s)%s\n",
+    vlog("playlist: %d item(s)%s\n",
             pl->count, shuffle ? " (shuffled)" : "");
     return 0;
 }

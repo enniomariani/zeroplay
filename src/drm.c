@@ -145,7 +145,7 @@ static void ft_init(void)
         return;
     }
     FT_Set_Pixel_Sizes(ft_face, 0, FONT_SIZE_PX);
-    fprintf(stderr, "drm: FreeType loaded %s @ %dpx\n", FONT_PATH, FONT_SIZE_PX);
+    vlog("drm: FreeType loaded %s @ %dpx\n", FONT_PATH, FONT_SIZE_PX);
 }
 
 static void ft_close(void)
@@ -729,7 +729,7 @@ static void setup_overlay_buffer(int fd, DrmOutput *out)
     out->ovl_buf_size = creq.size;
     out->ovl_map      = map;
 
-    fprintf(stderr, "drm: subtitle overlay plane %u allocated "
+    vlog("drm: subtitle overlay plane %u allocated "
             "(%ux%u ARGB8888)\n",
             out->ovl_plane_id, out->mode_w, out->mode_h);
     return;
