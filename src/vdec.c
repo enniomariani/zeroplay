@@ -18,6 +18,8 @@
 #define VIDEO_AUDIO_DESYNC_THRESHOLD_MIN 0.1
 #define VIDEO_AUDIO_DESYNC_EPSILON       0.01
 
+#define VDEC_DRAIN_STALL_SECONDS         10
+
 /* ------------------------------------------------------------------ */
 /* Internal helpers                                                     */
 /* ------------------------------------------------------------------ */
@@ -267,43 +269,6 @@ static int feed_packet(VdecContext *ctx, int buf_idx, AVPacket *pkt)
 }
 
 /* ------------------------------------------------------------------ */
-/* Send a zero-length EOS packet to signal end-of-stream to the HW    */
-/* decoder, causing it to flush its internal pipeline.                 */
-/* ------------------------------------------------------------------ */
-
-static int send_eos_packet(VdecContext *ctx, int *out_buf_free)
-{
-    for (int i = 0; i < VDEC_OUTPUT_BUFS; i++) {
-        if (!out_buf_free[i]) continue;
-
-        struct v4l2_buffer buf;
-        struct v4l2_plane  plane;
-        memset(&buf,   0, sizeof(buf));
-        memset(&plane, 0, sizeof(plane));
-
-        buf.type        = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
-        buf.memory      = V4L2_MEMORY_MMAP;
-        buf.index       = (uint32_t)i;
-        buf.m.planes    = &plane;
-        buf.length      = 1;
-        plane.bytesused = 0;                  /* zero-length = EOS signal */
-        plane.length    = ctx->out_buf_size;
-
-        if (xioctl(ctx->fd, VIDIOC_QBUF, &buf) < 0) {
-            perror("vdec: VIDIOC_QBUF EOS");
-            return -1;
-        }
-
-        out_buf_free[i] = 0;
-        vlog("vdec: EOS packet queued on output buf %d\n", i);
-        return 0;
-    }
-
-    /* No free buffer available yet — caller should retry next iteration */
-    return 1;
-}
-
-/* ------------------------------------------------------------------ */
 /* Public API                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -485,24 +450,22 @@ int vdec_open(VdecContext *ctx, AVStream *stream,
 
 /* ------------------------------------------------------------------ */
 
-#define VDEC_DRAIN_STALL_SECONDS 10
- 
 void vdec_run(VdecContext *ctx)
 {
     int out_buf_free[VDEC_OUTPUT_BUFS];
     for (int i = 0; i < VDEC_OUTPUT_BUFS; i++)
         out_buf_free[i] = 1;
- 
+
     int eos            = 0;
     int drain_cmd_sent = 0;
     int sps_timing     = 0;
     struct timespec sps_start   = {0};
     struct timespec last_output = {0};
- 
+
     struct pollfd pfd;
     pfd.fd     = ctx->fd;
     pfd.events = POLLIN | POLLPRI;
- 
+
     while (1) {
         /* Reclaim OUTPUT buffers */
         {
@@ -519,7 +482,7 @@ void vdec_run(VdecContext *ctx)
                 out_buf_free[buf.index] = 1;
             }
         }
- 
+
         /* Feed packets.
          * NOTE: there is deliberately NO "if (queue->closed) discard" branch
          * here. queue_pop() drains buffered items first and only returns 0
@@ -528,30 +491,29 @@ void vdec_run(VdecContext *ctx)
         if (!eos) {
             for (int i = 0; i < VDEC_OUTPUT_BUFS; i++) {
                 if (!out_buf_free[i]) continue;
- 
+
                 void *item = NULL;
                 if (!queue_pop(ctx->packet_queue, &item)) {
                     eos = 1;            /* closed and drained */
                     break;
                 }
                 AVPacket *raw_pkt = (AVPacket *)item;
- 
- 
+
                 if (ctx->bsf) {
                     if (av_bsf_send_packet(ctx->bsf, raw_pkt) < 0) {
                         av_packet_free(&raw_pkt);
                         continue;
                     }
                     av_packet_free(&raw_pkt);
- 
+
                     AVPacket *out_pkt = av_packet_alloc();
                     if (!out_pkt) continue;
- 
+
                     if (av_bsf_receive_packet(ctx->bsf, out_pkt) < 0) {
                         av_packet_free(&out_pkt);
                         continue;
                     }
- 
+
                     out_buf_free[i] = 0;
                     int err = feed_packet(ctx, i, out_pkt);
                     av_packet_free(&out_pkt);
@@ -564,7 +526,7 @@ void vdec_run(VdecContext *ctx)
                 }
             }
         }
- 
+
         /* Input exhausted — trigger the hardware drain exactly once.
          * V4L2_DEC_CMD_STOP tells bcm2835 no more input is coming, so it
          * should flush its pipeline and eventually mark the final CAPTURE
@@ -579,7 +541,7 @@ void vdec_run(VdecContext *ctx)
             clock_gettime(CLOCK_MONOTONIC, &last_output);
             vlog("vdec: input drained — sent DECODER_CMD STOP, draining\n");
         }
- 
+
         /* Poll */
         int ret = poll(&pfd, 1, 100);
         if (ret < 0) {
@@ -587,7 +549,7 @@ void vdec_run(VdecContext *ctx)
             perror("vdec: poll");
             break;
         }
- 
+
         /* Handle SOURCE_CHANGE */
         if (pfd.revents & POLLPRI) {
             struct v4l2_event evt;
@@ -602,7 +564,7 @@ void vdec_run(VdecContext *ctx)
                 }
             }
         }
- 
+
         /* Dequeue decoded frames */
         if ((pfd.revents & POLLIN) && ctx->fmt_negotiated) {
             while (1) {
@@ -614,11 +576,11 @@ void vdec_run(VdecContext *ctx)
                 buf.memory   = V4L2_MEMORY_MMAP;
                 buf.m.planes = &plane;
                 buf.length   = 1;
- 
+
                 if (xioctl(ctx->fd, VIDIOC_DQBUF, &buf) < 0) break;
- 
+
                 int is_last = (buf.flags & V4L2_BUF_FLAG_LAST) != 0;
- 
+
                 if (plane.bytesused > 0) {
                     DecodedFrame *frame = malloc(sizeof(DecodedFrame));
                     if (!frame) {
@@ -634,9 +596,7 @@ void vdec_run(VdecContext *ctx)
                         frame->sar_den    = ctx->sar_den;
                         frame->pts_us     = (int64_t)buf.timestamp.tv_sec * 1000000LL
                                           + (int64_t)buf.timestamp.tv_usec;
- 
 
- 
                         /* Block while ahead of audio (separate-audio path only) */
                         if (ctx->audio_pts) {
                             int64_t video_pts = frame->pts_us;
@@ -653,7 +613,7 @@ void vdec_run(VdecContext *ctx)
                             } while (!ctx->packet_queue->closed &&
                                      (delta > VIDEO_AUDIO_DESYNC_THRESHOLD_MIN));
                         }
- 
+
                         if (!queue_push(ctx->frame_queue, frame)) {
                             free(frame);
                             goto done;
@@ -664,16 +624,16 @@ void vdec_run(VdecContext *ctx)
                      * with no image payload) — just recycle it. */
                     xioctl(ctx->fd, VIDIOC_QBUF, &buf);
                 }
- 
+
                 clock_gettime(CLOCK_MONOTONIC, &last_output);
- 
+
                 if (is_last) {
                     vlog("vdec: V4L2_BUF_FLAG_LAST — hardware fully drained\n");
                     goto done;
                 }
             }
         }
- 
+
         /* Drain safety net: if we've asked the hardware to stop and it has
          * produced nothing for VDEC_DRAIN_STALL_SECONDS, give up rather than
          * spin forever (covers firmware that never sets BUF_FLAG_LAST). */
@@ -686,7 +646,7 @@ void vdec_run(VdecContext *ctx)
                 break;
             }
         }
- 
+
         /* If SOURCE_CHANGE never arrives after 10 real seconds, the hardware
          * can't decode this stream — bail out cleanly. */
         if (!ctx->fmt_negotiated) {
@@ -703,7 +663,7 @@ void vdec_run(VdecContext *ctx)
             sps_timing = 0;
         }
     }
- 
+
 done:
     queue_close(ctx->frame_queue);
 }
