@@ -901,18 +901,26 @@ int drm_open(DrmContext *ctx)
         if (!(devices[i]->available_nodes & (1 << DRM_NODE_PRIMARY)))
             continue;
         ctx->fd = open(devices[i]->nodes[DRM_NODE_PRIMARY], O_RDWR | O_CLOEXEC);
-        if (ctx->fd >= 0) break;
+
+        if(ctx->fd < 0){
+            vlog("drm: failed to open %s : %s\n", devices[i]->nodes[DRM_NODE_PRIMARY], strerror(errno));
+            continue;
+        }
+
+        if (drmSetClientCap(ctx->fd, DRM_CLIENT_CAP_ATOMIC, 1) == 0)
+            break;
+        else{
+            close(ctx->fd);
+            ctx->fd = -1;
+        }
     }
     drmFreeDevices(devices, device_count);
 
     if (ctx->fd < 0) {
-        fprintf(stderr, "drm: no suitable DRM device found\n");
+        fprintf(stderr, "drm: no DRM device with atomic mode setting found\n");
         return -1;
     }
 
-    if (drmSetClientCap(ctx->fd, DRM_CLIENT_CAP_ATOMIC, 1) < 0) {
-        fprintf(stderr, "drm: no atomic\n"); return -1;
-    }
     if (drmSetClientCap(ctx->fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) < 0) {
         fprintf(stderr, "drm: no universal planes\n"); return -1;
     }
