@@ -46,6 +46,7 @@ typedef struct {
     const char *sub_path;
     float       image_duration_s;
     int         shuffle;
+    int         control;            /* --control: local stdin/stdout control mode */
 #ifdef HAVE_WEBSOCKET
     const char *ws_url;
     const char *device_token;
@@ -79,6 +80,14 @@ static void print_usage(void)
         "  --image-duration n      seconds per image (default 10, 0 = hold forever)\n"
         "  --verbose               print decoder/driver info\n"
         "  --help                  show this message\n"
+        "\n"
+        "control mode:\n"
+        "  --control               read newline commands on stdin, hold the display\n"
+        "                          across clips (no console flash between videos).\n"
+        "                          commands: load <path> | loadloop <path> | pause |\n"
+        "                          resume | stop | quit. emits 'ended' on stdout when\n"
+        "                          a non-looping clip finishes. an optional initial\n"
+        "                          path is auto-looped at startup.\n"
         "\n"
         "websocket mode:\n"
         "  --ws-url URL            backend WebSocket URL (or BACKEND_WS_URL env)\n"
@@ -115,6 +124,7 @@ static int parse_args(int argc, char *argv[], Options *opt)
         { "sub",              required_argument, NULL, 's' },
         { "image-duration",   required_argument, NULL, 'd' },
         { "verbose",          no_argument,       NULL, 'V' },
+        { "control",          no_argument,       NULL, 'C' },
         { "hls-bitrate",      required_argument, NULL, 'B' },
         { "yt-quality",       required_argument, NULL, 'Y' },
         { "help",             no_argument,       NULL, 'h' },
@@ -136,6 +146,7 @@ static int parse_args(int argc, char *argv[], Options *opt)
             case 's': opt->sub_path          = optarg;       break;
             case 'd': opt->image_duration_s  = atof(optarg); break;
             case 'V': g_verbose              = 1;            break;
+            case 'C': opt->control           = 1;            break;
             case 'B': opt->hls_max_bandwidth = atoll(optarg); break;
             case 'Y': opt->yt_quality        = atoi(optarg); break;
             case 'h': print_usage(); exit(0);
@@ -174,9 +185,9 @@ static int parse_args(int argc, char *argv[], Options *opt)
 #endif
 
 #ifdef HAVE_WEBSOCKET
-    if (optind >= argc && !opt->ws_url) { print_usage(); return -1; }
+    if (optind >= argc && !opt->ws_url && !opt->control) { print_usage(); return -1; }
 #else
-    if (optind >= argc) { print_usage(); return -1; }
+    if (optind >= argc && !opt->control) { print_usage(); return -1; }
 #endif
 
     while (optind < argc && opt->path_count < MAX_FILES)
@@ -940,6 +951,237 @@ static int run_ws_mode(Options *opt)
 #endif /* HAVE_WEBSOCKET */
 
 /* ------------------------------------------------------------------ */
+/* Local control mode                                                   */
+/*                                                                      */
+/* A single long-lived process that opens DRM once and switches the     */
+/* playing clip on command, holding the display the whole time. Because  */
+/* DRM is never released, the framebuffer console never reappears        */
+/* between clips and the last frame of the outgoing clip stays on screen */
+/* until the first frame of the incoming clip is presented — no flash.   */
+/*                                                                      */
+/* Commands (newline-terminated, on stdin):                             */
+/*   load <path>      play <path> once; emit "ended" on stdout at EOS    */
+/*   loadloop <path>  play <path>, re-opening it seamlessly at each EOS  */
+/*   pause / resume   pause / resume playback                           */
+/*   stop             close the pipeline (holds last frame)             */
+/*   quit             exit cleanly (restores the console)               */
+/* Events (on stdout): "ready" at startup, "ended" when a non-looping    */
+/* clip finishes.                                                       */
+/* ------------------------------------------------------------------ */
+
+/* Non-blocking line reader over stdin. Returns 1 and fills `line`
+ * (NUL-terminated, trailing CR/LF stripped) when a full command is ready,
+ * 0 when nothing is available yet, and -1 when stdin has hit EOF (the
+ * controller closed the pipe). Single-threaded use only. */
+static int control_read_line(char *line, size_t cap)
+{
+    static char   buf[PLAYLIST_ITEM_PATH_SIZE * 2];
+    static size_t len = 0;
+
+    for (;;) {
+        char *nl = memchr(buf, '\n', len);
+        if (nl) {
+            size_t n    = (size_t)(nl - buf);
+            size_t copy = n < cap - 1 ? n : cap - 1;
+            memcpy(line, buf, copy);
+            line[copy] = '\0';
+            if (copy > 0 && line[copy - 1] == '\r') line[copy - 1] = '\0';
+            size_t rest = len - (n + 1);
+            memmove(buf, nl + 1, rest);
+            len = rest;
+            return 1;
+        }
+        if (len >= sizeof(buf) - 1) len = 0;  /* overlong line — discard */
+
+        ssize_t r = read(STDIN_FILENO, buf + len, sizeof(buf) - 1 - len);
+        if (r > 0)  { len += (size_t)r; continue; }  /* re-check for newline */
+        if (r == 0) return -1;                        /* EOF */
+        return 0;                                      /* EAGAIN — none ready */
+    }
+}
+
+static int run_control_mode(Options *opt)
+{
+    DrmContext drm;
+    if (drm_open(&drm) < 0)
+        return 1;
+
+    signal(SIGINT,  signal_handler);
+    signal(SIGTERM, signal_handler);
+
+    /* Poll stdin without stalling the render loop. */
+    int fl = fcntl(STDIN_FILENO, F_GETFL, 0);
+    if (fl != -1) fcntl(STDIN_FILENO, F_SETFL, fl | O_NONBLOCK);
+
+    {
+        struct sched_param sp = { .sched_priority = 10 };
+        pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
+    }
+
+    PlayerContext player;
+    memset(&player, 0, sizeof(player));
+    player.output_idx        = 0;
+    player.no_audio          = opt->no_audio;
+    player.drm_ctx           = &drm;
+    player.image_duration_us = (int64_t)(opt->image_duration_s * 1000000.0);
+
+    int  paused        = 0;
+    int  audio_started = 0;
+    int  current_loop  = 0;
+    char current_path[PLAYLIST_ITEM_PATH_SIZE]  = "";
+    char current_audio[PLAYLIST_ITEM_PATH_SIZE] = "";
+
+    fprintf(stderr, "zeroplay: control mode — ready\n");
+    printf("ready\n");
+    fflush(stdout);
+
+    /* Optional initial path is auto-looped so the screen is live immediately. */
+    if (opt->path_count > 0) {
+        parse_separated_video_audio_url(opt->paths[0], current_path, current_audio);
+        if (player_open_video(&player, current_path, current_audio, opt) == 0) {
+            if (player.audio_active) audio_pause(&player.audio);
+            player_threads_start(&player);
+            current_loop  = 1;
+            audio_started = 0;
+        } else {
+            fprintf(stderr, "zeroplay: failed to open initial '%s'\n", current_path);
+            current_path[0] = '\0';
+        }
+    }
+
+    while (!g_signal_quit) {
+        char line[PLAYLIST_ITEM_PATH_SIZE + 32];
+        int  lr;
+        while ((lr = control_read_line(line, sizeof(line))) == 1) {
+            char *cmd = line;
+            while (*cmd == ' ') cmd++;
+            char *arg = strchr(cmd, ' ');
+            if (arg) { *arg++ = '\0'; while (*arg == ' ') arg++; }
+
+            if ((strcmp(cmd, "load") == 0 || strcmp(cmd, "loadloop") == 0)
+                    && arg && *arg) {
+                int loop = (strcmp(cmd, "loadloop") == 0);
+                player_close_pipeline(&player);
+                paused        = 0;
+                audio_started = 0;
+                parse_separated_video_audio_url(arg, current_path, current_audio);
+                if (player_open_video(&player, current_path, current_audio, opt) < 0) {
+                    fprintf(stderr, "zeroplay: failed to open '%s'\n", current_path);
+                    current_path[0] = '\0';
+                    current_loop    = 0;
+                } else {
+                    if (player.audio_active) audio_pause(&player.audio);
+                    player_threads_start(&player);
+                    current_loop = loop;
+                    fprintf(stderr, "zeroplay: %s %s\n",
+                            loop ? "loadloop" : "load", current_path);
+                }
+            } else if (strcmp(cmd, "pause") == 0) {
+                if (player.pipeline_open && !paused) {
+                    paused = 1;
+                    if (player.audio_active) audio_pause(&player.audio);
+                }
+            } else if (strcmp(cmd, "resume") == 0) {
+                if (player.pipeline_open && paused) {
+                    paused = 0;
+                    if (player.held_frame)
+                        player.wall_start = now_us() - player.held_frame->pts_us;
+                    if (player.audio_active && audio_started)
+                        audio_resume(&player.audio);
+                }
+            } else if (strcmp(cmd, "stop") == 0) {
+                player_close_pipeline(&player);
+                current_loop    = 0;
+                current_path[0] = '\0';
+                paused          = 0;
+            } else if (strcmp(cmd, "quit") == 0) {
+                g_signal_quit = 1;
+            }
+        }
+        if (lr < 0) break;  /* stdin closed — controller gone, exit cleanly */
+
+        if (!player.pipeline_open) { sleep_us(50000); continue; }
+        if (paused)                { sleep_us(10000); continue; }
+
+        PlayerContext *p = &player;
+
+        if (!p->held_frame) {
+            void *item = NULL;
+            int rc = queue_trypop(&p->frame_queue, &item);
+            if (rc == 0) { sleep_us(2000); continue; }
+            if (rc < 0) {
+                if (p->prev_frame) {
+                    vdec_requeue_frame(&p->vdec, p->prev_frame);
+                    p->prev_frame = NULL;
+                }
+                /* End of stream. */
+                if (current_loop && current_path[0]) {
+                    /* Seamless re-loop: rebuild the pipeline on the same file.
+                     * The last frame stays on screen during the swap. */
+                    player_close_pipeline(p);
+                    if (player_open_video(p, current_path, current_audio, opt) == 0) {
+                        if (p->audio_active) audio_pause(&p->audio);
+                        player_threads_start(p);
+                        audio_started = 0;
+                    } else {
+                        fprintf(stderr, "zeroplay: re-loop failed for '%s'\n",
+                                current_path);
+                        current_loop    = 0;
+                        current_path[0] = '\0';
+                    }
+                } else {
+                    player_close_pipeline(p);
+                    current_path[0] = '\0';
+                    printf("ended\n");
+                    fflush(stdout);
+                }
+                continue;
+            }
+            p->held_frame = (DecodedFrame *)item;
+            p->frame_count++;
+        }
+
+        DecodedFrame *frame = p->held_frame;
+        p->current_pts = frame->pts_us;
+
+        if (p->sub_active) {
+            const char *sub = subtitle_get_active(&p->sub, p->current_pts);
+            if (sub != p->last_sub_text) {
+                drm_subtitle_update(&drm, p->output_idx, sub);
+                p->last_sub_text = sub;
+            }
+        }
+
+        if (p->frame_count == 1 || p->wall_start == 0)
+            p->wall_start = now_us() - frame->pts_us;
+
+        int64_t due = p->wall_start + frame->pts_us;
+        int64_t now = now_us();
+
+        if (due <= now) {
+            drm_present(&drm, p->output_idx, frame);
+            if (!audio_started && p->audio_active && !paused) {
+                audio_resume(&p->audio);
+                audio_started = 1;
+            }
+            p->held_frame = NULL;
+            if (p->prev_frame)
+                vdec_requeue_frame(&p->vdec, p->prev_frame);
+            p->prev_frame = frame;
+        } else {
+            int64_t sl = due - now;
+            if (sl > 2000) sl = 2000;
+            if (sl > 0) sleep_us(sl);
+        }
+    }
+
+    fprintf(stderr, "zeroplay: control mode shutting down\n");
+    player_close_pipeline(&player);
+    drm_close(&drm);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
 
 int main(int argc, char *argv[])
 {
@@ -960,6 +1202,12 @@ int main(int argc, char *argv[])
         return ret;
     }
 #endif
+
+    if (opt.control) {
+        int ret = run_control_mode(&opt);
+        avformat_network_deinit();
+        return ret;
+    }
 
     DrmContext drm;
     if (drm_open(&drm) < 0)
