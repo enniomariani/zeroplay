@@ -266,6 +266,35 @@ Runs ZeroPlay as a remotely controlled player, receiving commands from a backend
 ```bash
 zeroplay --ws-url ws://backend.local:8080/ws --device-token <token>
 ```
+## Control Mode
+
+Runs ZeroPlay as a long-lived process controlled via stdin/stdout. Unlike standard mode, the DRM display is held open between clips — no console flash between videos and the last frame stays on screen until the next clip starts.
+
+```bash
+zeroplay --control [initial_path]
+```
+
+If an initial path is given it auto-loops at startup so the screen is live immediately.
+
+### Commands (stdin, newline-terminated)
+
+| Command | Description |
+|---|---|
+| `load <path>` | Play a file once, emit `ended` on stdout at end |
+| `loadloop <path>` | Play a file, seamlessly re-looping at end |
+| `pause` | Pause playback |
+| `resume` | Resume playback |
+| `stop` | Stop and hold last frame |
+| `quit` | Exit cleanly |
+
+### Events (stdout)
+
+| Event | Description |
+|---|---|
+| `ready` | Emitted at startup when display is initialised |
+| `ended` | Emitted when a non-looping clip finishes |
+
+Useful for Python scripts, kiosk controllers, or any local process that needs seamless clip switching without WebSocket overhead.
 
 ### Options
 
