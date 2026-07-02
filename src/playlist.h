@@ -1,7 +1,9 @@
 #pragma once
 
+#include <limits.h>
+
 #define PLAYLIST_MAX_ITEMS      1024
-#define PLAYLIST_ITEM_PATH_SIZE 2048
+#define PLAYLIST_ITEM_PATH_SIZE PATH_MAX
 
 typedef enum {
     ITEM_VIDEO,
@@ -37,7 +39,7 @@ typedef struct {
  * Returns 0 on success, -1 on error.
  */
 int           playlist_open(Playlist *pl, const char *path, const char *path_audio,
-                             int loop, int shuffle, int yt_quality);
+                             int loop, int shuffle, int recurse, int yt_quality);
 void          playlist_close(Playlist *pl);
 
 /* Returns pointer to current item, or NULL if empty. */

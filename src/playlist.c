@@ -4,6 +4,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <limits.h>
 #include <time.h>
 #include "playlist.h"
 #include "log.h"
@@ -163,7 +164,7 @@ static int cmp_dirent(const struct dirent **a, const struct dirent **b)
     return strcasecmp((*a)->d_name, (*b)->d_name);
 }
 
-static int load_from_dir(Playlist *pl, const char *dirpath)
+static int load_from_dir(Playlist *pl, const char *dirpath, int recurse)
 {
     struct dirent **entries = NULL;
     int n = scandir(dirpath, &entries, NULL, cmp_dirent);
@@ -171,9 +172,12 @@ static int load_from_dir(Playlist *pl, const char *dirpath)
 
     for (int i = 0; i < n; i++) {
         if (entries[i]->d_name[0] != '.') {
-            char full[512];
+            char full[PATH_MAX];
             snprintf(full, sizeof(full), "%s/%s", dirpath, entries[i]->d_name);
-            add_item(pl, full);
+            if (recurse && entries[i]->d_type == DT_DIR)
+                load_from_dir(pl, full, recurse);
+            else
+                add_item(pl, full);
         }
         free(entries[i]);
     }
@@ -197,7 +201,7 @@ static void shuffle_items(Playlist *pl)
 /* ------------------------------------------------------------------ */
 
 int playlist_open(Playlist *pl, const char *path, const char *path_audio,
-                  int loop, int shuffle, int yt_quality)
+                  int loop, int shuffle, int recurse, int yt_quality)
 {
     memset(pl, 0, sizeof(*pl));
     pl->loop    = loop;
@@ -253,7 +257,7 @@ int playlist_open(Playlist *pl, const char *path, const char *path_audio,
         }
 
         if (S_ISDIR(st.st_mode))
-            load_from_dir(pl, path);
+            load_from_dir(pl, path, recurse);
         else if (is_playlist_file(path))
             load_from_txt(pl, path);
         else
