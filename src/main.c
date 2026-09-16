@@ -1186,27 +1186,37 @@ static int run_control_mode(Options *opt)
 
             if ((strcmp(cmd, "load") == 0 || strcmp(cmd, "loadloop") == 0)
                     && arg && *arg) {
+                PlaylistItemType type = type_from_ext(arg);
                 int loop = (strcmp(cmd, "loadloop") == 0);
+
                 player_close_pipeline(&player);
                 paused        = 0;
                 audio_started = 0;
-                /* Seamless looping is per clip here, not per session: the
-                 * demuxer never reports EOF in seamless mode, so applying it
-                 * to a one-shot "load" would swallow the "ended" event and
-                 * leave the controller waiting forever. */
-                player.loop_seamless = loop && opt->loop_seamless;
-                parse_separated_video_audio_url(arg, current_path, current_audio);
-                if (player_open_video(&player, current_path, current_audio, opt) < 0) {
-                    fprintf(stderr, "zeroplay: failed to open '%s'\n", current_path);
-                    current_path[0] = '\0';
-                    current_loop    = 0;
-                } else {
-                    if (player.audio_active) audio_pause(&player.audio);
 
-                    player_threads_start(&player);
-                    current_loop = loop;
-                    fprintf(stderr, "zeroplay: %s %s\n",
-                            loop ? "loadloop" : "load", current_path);
+                if(type == ITEM_IMAGE){
+                    if (show_image(&player, arg, &drm) == 0) {
+                        fprintf(stderr, "zeroplay[%d]: showing '%s'\n",
+                                player.output_idx, basename(arg));
+                    }
+                } else{
+                    /* Seamless looping is per clip here, not per session: the
+                     * demuxer never reports EOF in seamless mode, so applying it
+                     * to a one-shot "load" would swallow the "ended" event and
+                     * leave the controller waiting forever. */
+                    player.loop_seamless = loop && opt->loop_seamless;
+                    parse_separated_video_audio_url(arg, current_path, current_audio);
+                    if (player_open_video(&player, current_path, current_audio, opt) < 0) {
+                        fprintf(stderr, "zeroplay: failed to open '%s'\n", current_path);
+                        current_path[0] = '\0';
+                        current_loop    = 0;
+                    } else {
+                        if (player.audio_active) audio_pause(&player.audio);
+
+                        player_threads_start(&player);
+                        current_loop = loop;
+                        fprintf(stderr, "zeroplay: %s %s\n",
+                                loop ? "loadloop" : "load", current_path);
+                    }
                 }
             } else if (strcmp(cmd, "pause") == 0) {
                 if (player.pipeline_open && !paused) {
