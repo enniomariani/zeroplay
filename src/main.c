@@ -735,14 +735,14 @@ static void player_seek(PlayerContext *p, int64_t target_us)
     player_threads_start(p);
 }
 
-static int show_image(PlayerContext *p, const char *path, DrmContext *drm)
+static int show_image(PlayerContext *p, const char *path, DrmContext *drm, int64_t image_duration_us )
 {
     uint8_t *pixels = NULL;
     int w = 0, h = 0, stride = 0;
     if (image_decode_xrgb(path, &pixels, &w, &h, &stride) == 0) {
 
         p->image_mode   = 1;
-        p->image_end_us = (p->image_duration_us > 0) ? now_us() + p->image_duration_us : 0;
+        p->image_end_us = (image_duration_us > 0) ? now_us() + image_duration_us : 0;
 
         drm_present_image(drm, p->output_idx, pixels, w, h, stride);
         free(pixels);
@@ -765,7 +765,7 @@ static int player_advance_to_next(PlayerContext *p, DrmContext *drm,
         player_close_pipeline(p);
         p->image_mode = 0;
 
-        if (show_image(p, item->path, drm) == 0) {
+        if (show_image(p, item->path, drm, p->image_duration_us) == 0) {
             fprintf(stderr, "zeroplay[%d]: showing '%s'\n",
                     p->output_idx, basename(item->path));
         } else {
@@ -811,7 +811,7 @@ static int player_open(PlayerContext *p, const char *path,
     if (!item) { playlist_close(&p->playlist); return -1; }
 
     if (item->type == ITEM_IMAGE) {
-        if (show_image(p, item->path, drm) < 0){
+        if (show_image(p, item->path, drm, p->image_duration_us) < 0){
             if (player_advance_to_next(p, drm, opt) < 0) {
                 playlist_close(&p->playlist);
                 return -1;
@@ -851,7 +851,7 @@ static void player_go_to_prev(PlayerContext *p, DrmContext *drm,
     if (!item) return;
 
     if (item->type == ITEM_IMAGE) {
-        show_image(p, item->path, drm);
+        show_image(p, item->path, drm, p->image_duration_us);
         fprintf(stderr, "zeroplay[%d]: showing '%s'\n",
                 p->output_idx, basename(item->path));
     } else {
@@ -1154,6 +1154,7 @@ static int run_control_mode(Options *opt)
     int  paused        = 0;
     int  audio_started = 0;
     int  current_loop  = 0;
+    int  play_image = 0;
     char current_path[PLAYLIST_ITEM_PATH_SIZE]  = "";
     char current_audio[PLAYLIST_ITEM_PATH_SIZE] = "";
 
@@ -1166,9 +1167,11 @@ static int run_control_mode(Options *opt)
         PlaylistItemType type = type_from_ext(opt->paths[0]);
 
         if(type == ITEM_IMAGE){
-            if (show_image(&player, opt->paths[0], &drm) < 0) {
+            if (show_image(&player, opt->paths[0], &drm, 0) < 0) {
                 fprintf(stderr, "zeroplay: failed to open initial image '%s'\n", opt->paths[0]);
                 current_path[0] = '\0';
+            }else{
+                play_image = 1;
             }
         } else{
             parse_separated_video_audio_url(opt->paths[0], current_path, current_audio);
@@ -1203,9 +1206,14 @@ static int run_control_mode(Options *opt)
                 audio_started = 0;
 
                 if(type == ITEM_IMAGE){
-                    if (show_image(&player, arg, &drm) == 0) {
+                    int64_t image_duration_us = loop ? 0: player.image_duration_us;
+
+                    current_loop = loop;
+                    if (show_image(&player, arg, &drm, image_duration_us) == 0) {
                         fprintf(stderr, "zeroplay[%d]: showing '%s'\n",
                                 player.output_idx, basename(arg));
+
+                        play_image = 1;
                     }
                 } else{
                     /* Seamless looping is per clip here, not per session: the
@@ -1213,6 +1221,8 @@ static int run_control_mode(Options *opt)
                      * to a one-shot "load" would swallow the "ended" event and
                      * leave the controller waiting forever. */
                     player.loop_seamless = loop && opt->loop_seamless;
+
+                    play_image = 0;
                     parse_separated_video_audio_url(arg, current_path, current_audio);
                     if (player_open_video(&player, current_path, current_audio, opt) < 0) {
                         fprintf(stderr, "zeroplay: failed to open '%s'\n", current_path);
@@ -1251,7 +1261,15 @@ static int run_control_mode(Options *opt)
         }
         if (lr < 0) break;  /* stdin closed — controller gone, exit cleanly */
 
-        if (!player.pipeline_open) { sleep_us(50000); continue; }
+        if (play_image) {
+            if (player.image_end_us == 0)
+                continue;
+            if (player.image_end_us > 0 && now_us() < player.image_end_us)
+                continue;
+        }
+
+        if (!player.pipeline_open && !play_image) { sleep_us(50000); continue; }
+
         if (paused)                { sleep_us(10000); continue; }
 
         PlayerContext *p = &player;
