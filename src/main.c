@@ -735,6 +735,23 @@ static void player_seek(PlayerContext *p, int64_t target_us)
     player_threads_start(p);
 }
 
+static int show_image(PlayerContext *p, const char *path, DrmContext *drm)
+{
+    uint8_t *pixels = NULL;
+    int w = 0, h = 0, stride = 0;
+    if (image_decode_xrgb(path, &pixels, &w, &h, &stride) == 0) {
+
+        p->image_mode   = 1;
+        p->image_end_us = (p->image_duration_us > 0) ? now_us() + p->image_duration_us : 0;
+
+        drm_present_image(drm, p->output_idx, pixels, w, h, stride);
+        free(pixels);
+        return 0;
+    }
+
+    return -1;
+}
+
 static int player_advance_to_next(PlayerContext *p, DrmContext *drm,
                                    const Options *opt)
 {
@@ -748,11 +765,7 @@ static int player_advance_to_next(PlayerContext *p, DrmContext *drm,
         player_close_pipeline(p);
         p->image_mode = 0;
 
-        uint8_t *pixels = NULL;
-        int w = 0, h = 0, stride = 0;
-        if (image_decode_xrgb(item->path, &pixels, &w, &h, &stride) == 0) {
-            drm_present_image(drm, p->output_idx, pixels, w, h, stride);
-            free(pixels);
+        if (show_image(p, item->path, drm) == 0) {
             fprintf(stderr, "zeroplay[%d]: showing '%s'\n",
                     p->output_idx, basename(item->path));
         } else {
@@ -760,8 +773,6 @@ static int player_advance_to_next(PlayerContext *p, DrmContext *drm,
                     p->output_idx, item->path);
             return player_advance_to_next(p, drm, opt);
         }
-        p->image_mode   = 1;
-        p->image_end_us = (p->image_duration_us > 0) ? now_us() + p->image_duration_us : 0;
 
     } else {
         player_close_pipeline(p);
@@ -800,20 +811,13 @@ static int player_open(PlayerContext *p, const char *path,
     if (!item) { playlist_close(&p->playlist); return -1; }
 
     if (item->type == ITEM_IMAGE) {
-        uint8_t *pixels = NULL;
-        int w = 0, h = 0, stride = 0;
-        if (image_decode_xrgb(item->path, &pixels, &w, &h, &stride) == 0) {
-            drm_present_image(drm, output_idx, pixels, w, h, stride);
-            free(pixels);
-        } else {
+        if (show_image(p, item->path, drm) < 0){
             if (player_advance_to_next(p, drm, opt) < 0) {
                 playlist_close(&p->playlist);
                 return -1;
             }
             return 0;
         }
-        p->image_mode   = 1;
-        p->image_end_us = (p->image_duration_us > 0) ? now_us() + p->image_duration_us : 0;
         fprintf(stderr, "zeroplay[%d]: image '%s' (%.0fs)\n",
                 output_idx, item->path,
                 (double)p->image_duration_us / 1e6);
@@ -847,14 +851,7 @@ static void player_go_to_prev(PlayerContext *p, DrmContext *drm,
     if (!item) return;
 
     if (item->type == ITEM_IMAGE) {
-        uint8_t *pixels = NULL;
-        int w = 0, h = 0, stride = 0;
-        if (image_decode_xrgb(item->path, &pixels, &w, &h, &stride) == 0) {
-            drm_present_image(drm, p->output_idx, pixels, w, h, stride);
-            free(pixels);
-        }
-        p->image_mode   = 1;
-        p->image_end_us = (p->image_duration_us > 0) ? now_us() + p->image_duration_us : 0;
+        show_image(p, item->path, drm);
         fprintf(stderr, "zeroplay[%d]: showing '%s'\n",
                 p->output_idx, basename(item->path));
     } else {
