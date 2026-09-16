@@ -1163,15 +1163,24 @@ static int run_control_mode(Options *opt)
 
     /* Optional initial path is auto-looped so the screen is live immediately. */
     if (opt->path_count > 0) {
-        parse_separated_video_audio_url(opt->paths[0], current_path, current_audio);
-        if (player_open_video(&player, current_path, current_audio, opt) == 0) {
-            if (player.audio_active) audio_pause(&player.audio);
-            player_threads_start(&player);
-            current_loop  = 1;
-            audio_started = 0;
-        } else {
-            fprintf(stderr, "zeroplay: failed to open initial '%s'\n", current_path);
-            current_path[0] = '\0';
+        PlaylistItemType type = type_from_ext(opt->paths[0]);
+
+        if(type == ITEM_IMAGE){
+            if (show_image(&player, opt->paths[0], &drm) < 0) {
+                fprintf(stderr, "zeroplay: failed to open initial image '%s'\n", opt->paths[0]);
+                current_path[0] = '\0';
+            }
+        } else{
+            parse_separated_video_audio_url(opt->paths[0], current_path, current_audio);
+            if (player_open_video(&player, current_path, current_audio, opt) == 0) {
+                if (player.audio_active) audio_pause(&player.audio);
+                player_threads_start(&player);
+                current_loop  = 1;
+                audio_started = 0;
+            } else {
+                fprintf(stderr, "zeroplay: failed to open initial video '%s'\n", current_path);
+                current_path[0] = '\0';
+            }
         }
     }
 
