@@ -1027,7 +1027,7 @@ static int run_ws_mode(Options *opt)
         }
 
         if (!player.pipeline_open) { sleep_us(50000); continue; }
-        if (paused)                 { sleep_us(10000); continue; }
+        if (paused && !player.seek_pending) { sleep_us(10000); continue; }
 
         PlayerContext *p = &player;
 
@@ -1663,7 +1663,7 @@ int main(int argc, char *argv[])
             }
         }
 
-        if (paused) { sleep_us(10000); continue; }
+        if (paused && !player.seek_pending) { sleep_us(10000); continue; }
 
         int64_t next_due = INT64_MAX;
         int     all_eos  = 1;
