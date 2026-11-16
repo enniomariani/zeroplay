@@ -378,6 +378,8 @@ typedef struct {
     int64_t      image_duration_us;
     int64_t      duration_us;
     DrmContext  *drm_ctx;
+
+    int         seek_pending;
 } PlayerContext;
 
 typedef struct { PlayerContext *p; } ThreadArg;
@@ -570,6 +572,8 @@ static void player_close_pipeline(PlayerContext *p)
 {
     if (!p->pipeline_open) return;
 
+    p->seek_pending = 0;
+
     if (p->held_frame) {
         vdec_requeue_frame(&p->vdec, p->held_frame); p->held_frame = NULL;
     }
@@ -729,6 +733,10 @@ static void player_seek(PlayerContext *p, int64_t target_us)
     if (p->audio_active && p->separate_audio)
         demux_seek(&p->demux_audio, target_us);
     vdec_flush(&p->vdec);
+
+    vdec_set_seek_target(&p->vdec, target_us);
+    p->seek_pending = 1;        // player-level flag, cleared when the seek_result frame is presented
+
     if (p->audio_active) audio_flush(&p->audio);
     if (p->sub_active)   subtitle_flush(&p->sub);
     player_queues_reinit(p);
@@ -1298,6 +1306,8 @@ static int run_control_mode(Options *opt)
                     paused = 0;
                     if (player.held_frame)
                         player.wall_start = now_us() - player.held_frame->pts_us;
+                    else
+                        player.wall_start = now_us() - player.current_pts;
                     if (player.audio_active && audio_started)
                         audio_resume(&player.audio);
                 }
@@ -1368,7 +1378,7 @@ static int run_control_mode(Options *opt)
 
         if (!player.pipeline_open && !play_image) { sleep_us(50000); continue; }
 
-        if (paused)                { sleep_us(10000); continue; }
+        if (paused && !player.seek_pending) { sleep_us(10000); continue; }
 
         PlayerContext *p = &player;
 
@@ -1431,6 +1441,14 @@ static int run_control_mode(Options *opt)
 
         if (due <= now) {
             drm_present(&drm, p->output_idx, frame);
+
+            /* target frame is on screen, the seek is complete */
+            if (frame->seek_result) {
+                p->seek_pending = 0;
+                printf("seeked %lld\n", (long long)(frame->pts_us / 1000));
+                fflush(stdout);
+            }
+
             if (!audio_started && p->audio_active && !paused) {
                 audio_resume(&p->audio);
                 audio_started = 1;

@@ -243,6 +243,46 @@ static int handle_source_change(VdecContext *ctx)
     return 0;
 }
 
+void vdec_set_seek_target(VdecContext *ctx, int64_t target_us)
+{
+    ctx->seek_target = target_us;
+    ctx->seek_target += 1;     /* ~1 tick slack against rounding when seeking onto an exact frame pts */
+    ctx->seek_pending = 1;
+    ctx->seek_cand    = NULL;
+}
+
+static int vdec_emit(VdecContext *ctx, DecodedFrame *frame)
+{
+    if (ctx->audio_pts) {
+        int64_t video_pts = frame->pts_us;
+        double delta;
+        int first_iter = 1;
+        do {
+            delta = -(*ctx->audio_pts * ctx->audio_time_base
+                      - video_pts * ctx->video_time_base);
+            if (first_iter) {
+                first_iter = 0;
+                if (delta < VIDEO_AUDIO_DESYNC_THRESHOLD_MAX) break;
+            }
+            usleep(VIDEO_AUDIO_DESYNC_EPSILON * 1000000.0);
+        } while (!ctx->packet_queue->closed &&
+                 (delta > VIDEO_AUDIO_DESYNC_THRESHOLD_MIN));
+    }
+    return queue_push(ctx->frame_queue, frame);
+}
+
+/* EOS (or abort) while still hunting for the target: show the last frame we have. */
+static void vdec_finish_seek(VdecContext *ctx)
+{
+    if (ctx->seek_pending && ctx->seek_cand) {
+        DecodedFrame *c = ctx->seek_cand;
+        ctx->seek_cand = NULL;
+        c->seek_result = 1;
+        if (!vdec_emit(ctx, c)) free(c);
+    }
+    ctx->seek_pending = 0;
+}
+
 /* ------------------------------------------------------------------ */
 /* Feed one Annex B packet — convert PTS to microseconds               */
 /* ------------------------------------------------------------------ */
@@ -629,28 +669,37 @@ void vdec_run(VdecContext *ctx)
                         frame->sar_den    = ctx->sar_den;
                         frame->pts_us     = (int64_t)buf.timestamp.tv_sec * 1000000LL
                                           + (int64_t)buf.timestamp.tv_usec;
+                        frame->seek_result = 0;
 
-                        /* Block while ahead of audio (separate-audio path only) */
-                        if (ctx->audio_pts) {
-                            int64_t video_pts = frame->pts_us;
-                            double delta;
-                            int first_iter = 1;
-                            do {
-                                delta = -(*ctx->audio_pts * ctx->audio_time_base
-                                          - video_pts * ctx->video_time_base);
-                                if (first_iter) {
-                                    first_iter = 0;
-                                    if (delta < VIDEO_AUDIO_DESYNC_THRESHOLD_MAX) break;
+                        if (ctx->seek_pending) {
+                            if (frame->pts_us <= ctx->seek_target) {
+                                /* Before/at target: keep only the newest such frame.
+                                 * The > check keeps this correct even if the firmware
+                                 * hands frames back slightly out of order. */
+                                if (!ctx->seek_cand || frame->pts_us > ctx->seek_cand->pts_us) {
+                                    if (ctx->seek_cand) vdec_requeue_frame(ctx, ctx->seek_cand);
+                                    ctx->seek_cand = frame;
+                                } else {
+                                    vdec_requeue_frame(ctx, frame);   /* QBUF + free */
                                 }
-                                usleep(VIDEO_AUDIO_DESYNC_EPSILON * 1000000.0);
-                            } while (!ctx->packet_queue->closed &&
-                                     (delta > VIDEO_AUDIO_DESYNC_THRESHOLD_MIN));
+                                frame = NULL;
+                            } else {
+                                /* First frame after the target: the candidate is what is on
+                                 * screen at target_us. Emit it first, then this frame goes
+                                 * out normally, so no frame is lost from playback. */
+                                ctx->seek_pending = 0;
+                                if (ctx->seek_cand) {
+                                    DecodedFrame *c = ctx->seek_cand;
+                                    ctx->seek_cand = NULL;
+                                    c->seek_result = 1;
+                                    if (!vdec_emit(ctx, c)) { free(c); free(frame); goto done; }
+                                } else {
+                                    frame->seek_result = 1;   /* target precedes the first decoded frame */
+                                }
+                            }
                         }
 
-                        if (!queue_push(ctx->frame_queue, frame)) {
-                            free(frame);
-                            goto done;
-                        }
+                        if (frame && !vdec_emit(ctx, frame)) { free(frame); goto done; }
                     }
                 } else {
                     /* Empty buffer (may be the drain's end-of-stream marker
@@ -698,6 +747,7 @@ void vdec_run(VdecContext *ctx)
     }
 
 done:
+    vdec_finish_seek(ctx);      /* EOS before reaching the target */
     queue_close(ctx->frame_queue);
 }
 
@@ -733,6 +783,9 @@ int vdec_flush(VdecContext *ctx)
      * SOURCE_CHANGE as normal.
      */
     enum v4l2_buf_type type;
+
+    if (ctx->seek_cand) { free(ctx->seek_cand); ctx->seek_cand = NULL; }
+    ctx->seek_pending = 0;
 
     type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
     xioctl(ctx->fd, VIDIOC_STREAMOFF, &type);

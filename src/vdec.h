@@ -20,7 +20,7 @@
 #endif
 #include "queue.h"
 
-#define VDEC_OUTPUT_BUFS  4
+    #define VDEC_OUTPUT_BUFS  4
 #define VDEC_CAPTURE_BUFS 8
 
 typedef struct {
@@ -34,6 +34,8 @@ typedef struct {
     int         sar_num;
     int         sar_den;
     int64_t     pts_us;
+
+    int            seek_result;    /* 1 = this is the frame shown at the seek target */
 } DecodedFrame;
 
 typedef struct {
@@ -69,11 +71,16 @@ typedef struct {
     volatile int64_t *audio_pts;
     double            video_time_base;
     double            audio_time_base;
+
+    int64_t        seek_target;    /* same units as DecodedFrame.pts_us */
+    int            seek_pending;   /* only touched by the vdec thread / before it starts */
+    DecodedFrame  *seek_cand;      /* best frame with pts <= target so far */
 } VdecContext;
 
 int  vdec_open(VdecContext *ctx, AVStream *stream,
                Queue *packet_queue, Queue *frame_queue);
 void vdec_run(VdecContext *ctx);
+void vdec_set_seek_target(VdecContext *ctx, int64_t target_us);
 int  vdec_flush(VdecContext *ctx);   /* call after seek, before restart */
 void vdec_requeue_frame(VdecContext *ctx, DecodedFrame *frame);
 void vdec_close(VdecContext *ctx);
