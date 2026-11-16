@@ -1663,7 +1663,11 @@ int main(int argc, char *argv[])
             }
         }
 
-        if (paused && !player.seek_pending) { sleep_us(10000); continue; }
+        int any_seek_pending = 0;
+        for (int i = 0; i < opened; i++)
+            if (players[i].seek_pending) any_seek_pending = 1;
+
+        if (paused && !any_seek_pending) { sleep_us(10000); continue; }
 
         int64_t next_due = INT64_MAX;
         int     all_eos  = 1;
