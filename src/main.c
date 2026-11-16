@@ -1560,6 +1560,9 @@ int main(int argc, char *argv[])
                     if (players[i].held_frame)
                         players[i].wall_start =
                             now_us() - players[i].held_frame->pts_us;
+                    else if (players[i].pipeline_open)
+                        players[i].wall_start =
+                            now_us() - players[i].current_pts;
                     if (players[i].audio_active) audio_resume(&players[i].audio);
                 }
             }
@@ -1677,6 +1680,8 @@ int main(int argc, char *argv[])
             if (p->eos) continue;
             all_eos = 0;
 
+            if (paused && !p->seek_pending) continue;
+
             if (p->image_mode) {
                 if (p->image_end_us > 0 && now_us() >= p->image_end_us) {
                     if (player_advance_to_next(p, &drm, &opt) < 0)
@@ -1736,6 +1741,8 @@ int main(int argc, char *argv[])
 
             if (due <= now) {
                 drm_present(&drm, p->output_idx, frame);
+                if (frame->seek_result)
+                    p->seek_pending = 0;
                 p->held_frame = NULL;
                 if (p->prev_frame)
                     vdec_requeue_frame(&p->vdec, p->prev_frame);
