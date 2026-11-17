@@ -18,7 +18,9 @@ typedef struct {
     int64_t          sub_rebase;
 
     int64_t         seek_drop_audio_before_us;
+    int64_t         seek_drop_subs_before_us;
     AVRational      audio_tb;
+    AVRational      subs_tb;
 
     Queue           *video_queue;
     Queue           *audio_queue;

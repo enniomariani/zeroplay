@@ -231,7 +231,6 @@ int demux_init_seamless(DemuxContext *ctx)
     ctx->audio_rebase_truncated = -1;
     ctx->sub_rebase             = -1;
 
-    AVRational stb;
     AVRational vtb = ctx->fmt_ctx->streams[ctx->video_stream_idx]->time_base;
 
     /* Needed below for both the audio rebase and the subtitle rebase — compute
@@ -295,10 +294,8 @@ int demux_init_seamless(DemuxContext *ctx)
         ctx->audio_rebase_truncated = (ctx->audio_rebase / audio_frame_ticks) * audio_frame_ticks;
     }
 
-    if(ctx->subtitle_stream_idx != -1){
-        stb = ctx->fmt_ctx->streams[ctx->subtitle_stream_idx]->time_base;
-        ctx->sub_rebase = (int64_t)(video_loop_sec * stb.den / stb.num);
-    }
+    if(ctx->subtitle_stream_idx != -1)
+        ctx->sub_rebase = (int64_t)(video_loop_sec * ctx->subs_tb.den / ctx->subs_tb.num);
 
     /* Every packet is dropped or faded against these, so a silently wrong
      * value costs the whole stream. Log them. */
@@ -324,6 +321,9 @@ void demux_run(DemuxContext *ctx)
 
     if(ctx->audio_stream_idx != -1)
         ctx->audio_tb = ctx->fmt_ctx->streams[ctx->audio_stream_idx]->time_base;
+
+    if(ctx->subtitle_stream_idx != -1)
+        ctx->subs_tb = ctx->fmt_ctx->streams[ctx->subtitle_stream_idx]->time_base;
 
     AVPacket *pkt = av_packet_alloc();
 
@@ -371,6 +371,7 @@ void demux_run(DemuxContext *ctx)
                 continue;
             }
             ctx->seek_drop_audio_before_us = -1;
+            ctx->seek_drop_subs_before_us = -1;
             break;
           } else if (ret == AVERROR(EAGAIN)) {
               av_usleep(1000);
@@ -404,9 +405,6 @@ void demux_run(DemuxContext *ctx)
                     int64_t end_us = av_rescale_q(ts + pkt->duration,
                                                   ctx->audio_tb,
                                                   (AVRational){1, 1000000});
-
-                   fprintf(stderr, "demux: check audio-pkt: %ld / %ld \n", ctx->seek_drop_audio_before_us, end_us);
-
 
                     if (end_us <= ctx->seek_drop_audio_before_us) {
                         av_packet_unref(pkt);   /* entirely before the target: drop */
@@ -455,6 +453,19 @@ void demux_run(DemuxContext *ctx)
             }
         } else if (pkt->stream_index == ctx->subtitle_stream_idx &&
                    ctx->subtitle_queue) {
+
+           if (ctx->seek_drop_subs_before_us >= 0) {
+               int64_t ts = (pkt->pts != AV_NOPTS_VALUE) ? pkt->pts : pkt->dts;
+                if (ts != AV_NOPTS_VALUE && tb.den > 0 && pkt->duration > 0) {
+                    int64_t end_us = av_rescale_q(ts + pkt->duration, tb,
+                                                  (AVRational){1, 1000000});
+                    if (end_us <= ctx->seek_drop_sub_before_us) {
+                        av_packet_unref(pkt);   /* ended before the target */
+                        continue;
+                    }
+                }
+               ctx->seek_drop_subs_before_us = -1;
+           }
 
             //seamless loop: skip subtitle-packets if they exceed video-duration
             if (ctx->loop_seamless && pkt->pts >= ctx->sub_rebase) {
@@ -509,10 +520,12 @@ int demux_seek(DemuxContext *ctx, int64_t target_us)
     if (ret < 0) {
         fprintf(stderr, "demux: seek failed\n");
         ctx->seek_drop_audio_before_us = -1;
+        ctx->seek_drop_subs_before_us = -1;
         return -1;
     }
 
     ctx->seek_drop_audio_before_us = target_us;
+    ctx->seek_drop_subs_before_us = target_us;
     return 0;
 }
 
