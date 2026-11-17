@@ -731,8 +731,6 @@ static void player_seek(PlayerContext *p, int64_t target_us)
     player_threads_stop(p);
     demux_seek(&p->demux, target_us);
 
-    p->demux.seek_drop_audio_before_us = target_us;
-
     if (p->audio_active && p->separate_audio)
         demux_seek(&p->demux_audio, target_us);
     vdec_flush(&p->vdec);

@@ -370,7 +370,7 @@ void demux_run(DemuxContext *ctx)
 
                 continue;
             }
-
+            ctx->seek_drop_audio_before_us = -1;
             break;
           } else if (ret == AVERROR(EAGAIN)) {
               av_usleep(1000);
@@ -404,6 +404,9 @@ void demux_run(DemuxContext *ctx)
                     int64_t end_us = av_rescale_q(ts + pkt->duration,
                                                   ctx->audio_tb,
                                                   (AVRational){1, 1000000});
+
+                   fprintf(stderr, "demux: check audio-pkt: %ld / %ld \n", ctx->seek_drop_audio_before_us, end_us);
+
 
                     if (end_us <= ctx->seek_drop_audio_before_us) {
                         av_packet_unref(pkt);   /* entirely before the target: drop */
@@ -505,8 +508,11 @@ int demux_seek(DemuxContext *ctx, int64_t target_us)
                             target_us < 0 ? 0 : AVSEEK_FLAG_BACKWARD);
     if (ret < 0) {
         fprintf(stderr, "demux: seek failed\n");
+        ctx->seek_drop_audio_before_us = -1;
         return -1;
     }
+
+    ctx->seek_drop_audio_before_us = target_us;
     return 0;
 }
 
