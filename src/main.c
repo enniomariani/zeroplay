@@ -337,6 +337,8 @@ static int find_srt_alongside(const char *video_path,
 /* PlayerContext                                                        */
 /* ------------------------------------------------------------------ */
 
+static const char SUB_UNKNOWN[] = "";
+
 typedef struct {
     Playlist     playlist;
     DemuxContext demux;
@@ -739,13 +741,14 @@ static void player_seek(PlayerContext *p, int64_t target_us)
     p->seek_pending = 1;        // player-level flag, cleared when the seek_result frame is presented
 
     if (p->audio_active) audio_flush(&p->audio);
-    if (p->sub_active)   subtitle_flush(&p->sub);
+
+    if (p->sub_active && p->sub_embedded)   subtitle_flush(&p->sub);
     player_queues_reinit(p);
 
     p->wall_start    = 0;
     p->frame_count   = 0;
     p->eos           = 0;
-    p->last_sub_text = NULL;
+    p->last_sub_text = SUB_UNKNOWN;
 
     player_threads_start(p);
 }
