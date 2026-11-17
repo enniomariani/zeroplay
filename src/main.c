@@ -821,13 +821,13 @@ static int player_open(PlayerContext *p, const char *path,
                         const Options *opt, int output_idx, DrmContext *drm)
 {
     memset(p, 0, sizeof(*p));
-    p->output_idx                       = output_idx;
-    p->no_audio                         = opt->no_audio || (output_idx != 0);
-    p->no_downmix                       = opt->no_downmix;
-    p->separate_audio                   = 0;
-    p->image_duration_us                = (int64_t)(opt->image_duration_s * 1000000.0);
-    p->drm_ctx                          = drm;
-    p->loop_seamless                    = opt->loop_seamless;
+    p->output_idx        = output_idx;
+    p->no_audio          = opt->no_audio || (output_idx != 0);
+    p->no_downmix        = opt->no_downmix;
+    p->separate_audio    = 0;
+    p->image_duration_us = (int64_t)(opt->image_duration_s * 1000000.0);
+    p->drm_ctx           = drm;
+    p->loop_seamless     = opt->loop_seamless;
 
     if (playlist_open(&p->playlist, path, path_audio,
                       opt->loop, opt->shuffle, opt->recurse, opt->yt_quality) < 0)
