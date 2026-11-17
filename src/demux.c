@@ -456,10 +456,10 @@ void demux_run(DemuxContext *ctx)
 
            if (ctx->seek_drop_subs_before_us >= 0) {
                int64_t ts = (pkt->pts != AV_NOPTS_VALUE) ? pkt->pts : pkt->dts;
-                if (ts != AV_NOPTS_VALUE && tb.den > 0 && pkt->duration > 0) {
-                    int64_t end_us = av_rescale_q(ts + pkt->duration, tb,
+                if (ts != AV_NOPTS_VALUE && ctx->subs_tb.den > 0 && pkt->duration > 0) {
+                    int64_t end_us = av_rescale_q(ts + pkt->duration, ctx->subs_tb,
                                                   (AVRational){1, 1000000});
-                    if (end_us <= ctx->seek_drop_sub_before_us) {
+                    if (end_us <= ctx->seek_drop_subs_before_us) {
                         av_packet_unref(pkt);   /* ended before the target */
                         continue;
                     }
