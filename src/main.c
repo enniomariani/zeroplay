@@ -730,6 +730,9 @@ static void player_seek(PlayerContext *p, int64_t target_us)
 
     player_threads_stop(p);
     demux_seek(&p->demux, target_us);
+
+    p->demux.seek_drop_audio_before_us = target_us;
+
     if (p->audio_active && p->separate_audio)
         demux_seek(&p->demux_audio, target_us);
     vdec_flush(&p->vdec);
@@ -1739,7 +1742,9 @@ int main(int argc, char *argv[])
             int64_t due = p->wall_start + frame->pts_us;
             int64_t now = now_us();
 
-            if (due <= now) {
+            /* A seek result should be displayed immediately when paused.
+             * Normal playback scheduling does not apply to paused seeking. */
+            if ((paused && frame->seek_result) || due <= now) {
                 drm_present(&drm, p->output_idx, frame);
                 if (frame->seek_result)
                     p->seek_pending = 0;

@@ -231,7 +231,6 @@ int demux_init_seamless(DemuxContext *ctx)
     ctx->audio_rebase_truncated = -1;
     ctx->sub_rebase             = -1;
 
-    AVRational atb;
     AVRational stb;
     AVRational vtb = ctx->fmt_ctx->streams[ctx->video_stream_idx]->time_base;
 
@@ -251,7 +250,7 @@ int demux_init_seamless(DemuxContext *ctx)
     ctx->video_rebase = (int64_t)(video_loop_sec * vtb.den / vtb.num);
 
     if(ctx->audio_stream_idx != -1){
-        atb = ctx->fmt_ctx->streams[ctx->audio_stream_idx]->time_base;
+        ctx->audio_tb = ctx->fmt_ctx->streams[ctx->audio_stream_idx]->time_base;
 
         AVCodecParameters *acp = ctx->fmt_ctx->streams[ctx->audio_stream_idx]->codecpar;
 
@@ -294,7 +293,7 @@ int demux_init_seamless(DemuxContext *ctx)
          * quantising it would drift the two timelines apart a little more on
          * every loop); audio_rebase_truncated is quantised to a whole number
          * of frames and used only as the packet-skip/is_loop_end threshold. */
-        ctx->audio_rebase           = (int64_t)(video_loop_sec * atb.den / atb.num);
+        ctx->audio_rebase           = (int64_t)(video_loop_sec * ctx->audio_tb.den / ctx->audio_tb.num);
         ctx->audio_rebase_truncated = (ctx->audio_rebase / audio_frame_ticks) * audio_frame_ticks;
     }
 
@@ -397,6 +396,15 @@ void demux_run(DemuxContext *ctx)
                 break;
             }
         } else if (pkt->stream_index == ctx->audio_stream_idx) {
+
+             int64_t end_us = av_rescale_q(pkt->pts + pkt->duration,
+                                          ctx->audio_tb, (AVRational){1, 1000000});
+            if (ctx->seek_drop_audio_before_us && end_us <= ctx->seek_drop_audio_before_us) {
+                av_packet_unref(pkt);        /* entirely before the target: drop */
+                continue;
+            }
+            ctx->seek_drop_audio_before_us = 0; /* first audio at/after target: stop dropping */
+
             //seamless loop: skip audio-packets if they exceed video-duration
             //(checked before allocating, so a skipped packet costs nothing)
             if (ctx->loop_seamless && pkt->pts >= ctx->audio_rebase_truncated + pkt->duration) {

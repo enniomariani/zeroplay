@@ -17,6 +17,9 @@ typedef struct {
     int64_t          audio_rebase_truncated;    /* truncated to audio-packet-duration */
     int64_t          sub_rebase;
 
+    int64_t         seek_drop_audio_before_us;
+    AVRational      audio_tb;
+
     Queue           *video_queue;
     Queue           *audio_queue;
     Queue           *subtitle_queue;       /* NULL = drop subtitle packets */
