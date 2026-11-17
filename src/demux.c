@@ -250,8 +250,6 @@ int demux_init_seamless(DemuxContext *ctx)
     ctx->video_rebase = (int64_t)(video_loop_sec * vtb.den / vtb.num);
 
     if(ctx->audio_stream_idx != -1){
-        ctx->audio_tb = ctx->fmt_ctx->streams[ctx->audio_stream_idx]->time_base;
-
         AVCodecParameters *acp = ctx->fmt_ctx->streams[ctx->audio_stream_idx]->codecpar;
 
         audio_frame_ticks = av_get_audio_frame_duration2(acp, 0);
@@ -323,6 +321,9 @@ void demux_run(DemuxContext *ctx)
 
     int video_done = 0;
     int audio_done = (ctx->audio_stream_idx == -1); // no audio stream = done
+
+    if(ctx->audio_stream_idx != -1)
+        ctx->audio_tb = ctx->fmt_ctx->streams[ctx->audio_stream_idx]->time_base;
 
     AVPacket *pkt = av_packet_alloc();
 
@@ -397,13 +398,20 @@ void demux_run(DemuxContext *ctx)
             }
         } else if (pkt->stream_index == ctx->audio_stream_idx) {
 
-             int64_t end_us = av_rescale_q(pkt->pts + pkt->duration,
-                                          ctx->audio_tb, (AVRational){1, 1000000});
-            if (ctx->seek_drop_audio_before_us && end_us <= ctx->seek_drop_audio_before_us) {
-                av_packet_unref(pkt);        /* entirely before the target: drop */
-                continue;
-            }
-            ctx->seek_drop_audio_before_us = 0; /* first audio at/after target: stop dropping */
+            if (ctx->seek_drop_audio_before_us) {
+                    int64_t ts = (pkt->pts != AV_NOPTS_VALUE) ? pkt->pts : pkt->dts;
+                    if (ts != AV_NOPTS_VALUE) {
+                        int64_t end_us = av_rescale_q(ts + pkt->duration,
+                                                      ctx->audio_tb,
+                                                      (AVRational){1, 1000000});
+
+                        if (end_us <= ctx->seek_drop_audio_before_us) {
+                            av_packet_unref(pkt);   /* entirely before the target: drop */
+                            continue;
+                        }
+                    }
+                    ctx->seek_drop_audio_before_us = 0;   /* first audio at/after target: stop dropping */
+                }
 
             //seamless loop: skip audio-packets if they exceed video-duration
             //(checked before allocating, so a skipped packet costs nothing)
