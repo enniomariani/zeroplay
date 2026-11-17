@@ -733,6 +733,11 @@ static void player_seek(PlayerContext *p, int64_t target_us)
     player_threads_stop(p);
     demux_seek(&p->demux, target_us);
 
+    /* Seamless loop: a seek to the end means "start over". Remap here so
+     * demuxer, vdec filter and audio drop all use the same target. */
+    if (p->loop_seamless && p->duration_us > 0 && target_us >= p->duration_us)
+        target_us = 0;
+
     if (p->audio_active && p->separate_audio)
         demux_seek(&p->demux_audio, target_us);
     vdec_flush(&p->vdec);
