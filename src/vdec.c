@@ -275,10 +275,10 @@ static int vdec_emit(VdecContext *ctx, DecodedFrame *frame)
 static void vdec_finish_seek(VdecContext *ctx)
 {
     if (ctx->seek_pending && ctx->seek_cand) {
-        DecodedFrame *c = ctx->seek_cand;
+        DecodedFrame *frame = ctx->seek_cand;
         ctx->seek_cand = NULL;
-        c->seek_result = 1;
-        if (!vdec_emit(ctx, c)) free(c);
+        frame->seek_result = 1;
+        if (!vdec_emit(ctx, frame)) free(c);
     }
     ctx->seek_pending = 0;
 }
