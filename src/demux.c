@@ -27,6 +27,8 @@ int demux_open(DemuxContext *ctx, const char *filename,
     ctx->video_queue         = video_queue;
     ctx->audio_queue         = audio_queue;
     ctx->subtitle_queue      = NULL;
+    ctx->seek_drop_audio_before_us = -1;
+    ctx->seek_drop_subs_before_us = -1;
 
     /*
      * Pre-allocate the format context so that memory limits are in effect
