@@ -343,6 +343,9 @@ void demux_run(DemuxContext *ctx)
 
         if (ret == AVERROR_EOF) {
 
+            ctx->seek_drop_audio_before_us = -1;
+            ctx->seek_drop_subs_before_us = -1;
+
             if(ctx->loop_seamless) {
 
                 if(!(video_done && audio_done)){
@@ -372,8 +375,6 @@ void demux_run(DemuxContext *ctx)
 
                 continue;
             }
-            ctx->seek_drop_audio_before_us = -1;
-            ctx->seek_drop_subs_before_us = -1;
             break;
           } else if (ret == AVERROR(EAGAIN)) {
               av_usleep(1000);
