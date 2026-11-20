@@ -1336,8 +1336,10 @@ static int run_control_mode(Options *opt)
                 char *end;
                 long long value = strtoll(arg, &end, 10);
 
-                if (end == arg || *end != '\0') {
-                    fprintf(stderr, "zeroplay: %s is not a valid seek value\n",arg);
+                if (end == arg || *end != '\0' || errno == ERANGE || value > (LLONG_MAX / 1000)) {
+                    fprintf(stderr, "zeroplay: %s is not a valid seek value "
+                                                        "(0..%lld ms accepted)\n",
+                                                arg, (long long)(LLONG_MAX / 1000));
                     continue;
                 }
 
