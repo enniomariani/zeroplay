@@ -539,25 +539,36 @@ done:
 
 /* ------------------------------------------------------------------ */
 
-int demux_seek(DemuxContext *ctx, int64_t target_us)
+int demux_seek(DemuxContext *ctx, int64_t target_us, int preroll)
 {
-    /* Clamp to valid range */
     if (target_us < 0) target_us = 0;
     if (ctx->duration_us > 0 && target_us > ctx->duration_us)
         target_us = ctx->duration_us;
 
-    /* av_seek_frame uses AV_TIME_BASE (microseconds) when stream_index=-1 */
-    int ret = av_seek_frame(ctx->fmt_ctx, -1, target_us,
-                            target_us < 0 ? 0 : AVSEEK_FLAG_BACKWARD);
-    if (ret < 0) {
-        fprintf(stderr, "demux: seek failed\n");
+    /* TS/HLS have no seek index: av_seek_frame() estimates a byte offset
+     * from the average bitrate and physically scans for the nearest sync
+     * point, which can land UP TO ONE FULL GOP PAST the requested time.
+     * Compensate by aiming a fixed margin EARLIER. The true target is never
+     * given to av_seek_frame(); it lives in the drop flags below and in
+     * vdec_set_seek_target(), which decode forward to the exact frame. */
+    int64_t aim_us = target_us;
+
+    if(preroll > -1){
+        aim_us -= preroll * 1000000LL;
+
+        if(aim_us < 0)
+            aim_us = 0;
+    }
+
+    if (av_seek_frame(ctx->fmt_ctx, -1, aim_us, AVSEEK_FLAG_BACKWARD) != 0) {
+        fprintf(stderr, "demux: seek to %.1fs failed\n", target_us / 1e6);
         ctx->seek_drop_audio_before_us = -1;
-        ctx->seek_drop_subs_before_us = -1;
+        ctx->seek_drop_subs_before_us  = -1;
         return -1;
     }
 
     ctx->seek_drop_audio_before_us = target_us;
-    ctx->seek_drop_subs_before_us = target_us;
+    ctx->seek_drop_subs_before_us  = target_us;
     return 0;
 }
 

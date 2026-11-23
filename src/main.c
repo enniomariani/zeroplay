@@ -53,6 +53,7 @@ typedef struct {
     const char *audio_device;
     const char *sub_path;
     float       image_duration_s;
+    int         preroll_seek;
     int         shuffle;
     int         recurse;
     int         control;            /* --control: local stdin/stdout control mode */
@@ -90,6 +91,7 @@ static void print_usage(void)
         "  --yt-quality n          YouTube stream height cap (default: 480)\n"
         "                          e.g. 360, 480, 720, 1080 (requires yt-dlp)\n"
         "  --image-duration n      seconds per image (default 10, 0 = hold forever)\n"
+        "  --preroll-seek n        seconds to preroll seek command. Used to ensure frame-accurate seek for MPEG TS\n"
         "  --spi-fill              SPI/DBI panel: crop video to fill (default: fit with bars)\n"
         "  --verbose               print decoder/driver info\n"
         "  --help                  show this message\n"
@@ -126,6 +128,7 @@ static int parse_args(int argc, char *argv[], Options *opt)
     memset(opt, 0, sizeof(*opt));
     opt->vol              = 100.0f;
     opt->image_duration_s = 10.0f;
+    opt->preroll_seek     = -1;
 
     static struct option long_opts[] = {
         { "loop",             no_argument,       NULL, 'l' },
@@ -139,6 +142,7 @@ static int parse_args(int argc, char *argv[], Options *opt)
         { "audio-device",     required_argument, NULL, 'a' },
         { "sub",              required_argument, NULL, 's' },
         { "image-duration",   required_argument, NULL, 'd' },
+        { "preroll-seek",     no_argument,       NULL, 'P' },
         { "spi-fill",         no_argument,       NULL, 'F' },
         { "verbose",          no_argument,       NULL, 'V' },
         { "control",          no_argument,       NULL, 'C' },
@@ -166,6 +170,7 @@ static int parse_args(int argc, char *argv[], Options *opt)
             case 's': opt->sub_path          = optarg;       break;
             case 'd': opt->image_duration_s  = atof(optarg); break;
             case 'F': g_spi_fill             = 1;            break;
+            case 'P': opt->preroll_seek      = atoi(optarg); break;
             case 'V': g_verbose              = 1;            break;
             case 'C': opt->control           = 1;            break;
             case 'B': opt->hls_max_bandwidth = atoll(optarg); break;
@@ -361,6 +366,8 @@ typedef struct {
 
     int          loop;
     int          loop_seamless;
+
+    int          preroll_seek;
 
     int64_t      wall_start;
     int          frame_count;
@@ -681,9 +688,9 @@ static int player_open_video(PlayerContext *p, const char *filename,
     if (opt->start_pos > 0.0) {
         int64_t start_us = (int64_t)(opt->start_pos * 1000000.0);
         if (start_us > p->duration_us) start_us = p->duration_us;
-        demux_seek(&p->demux, start_us);
+        demux_seek(&p->demux, start_us, p->preroll_seek);
         if (p->audio_active && p->separate_audio)
-            demux_seek(&p->demux_audio, start_us);
+            demux_seek(&p->demux_audio, start_us, p->preroll_seek);
         p->current_pts = start_us;
     }
 
@@ -736,10 +743,10 @@ static void player_seek(PlayerContext *p, int64_t target_us)
     if (p->prev_frame) { vdec_requeue_frame(&p->vdec, p->prev_frame); p->prev_frame  = NULL; }
 
     player_threads_stop(p);
-    demux_seek(&p->demux, target_us);
+    demux_seek(&p->demux, target_us, p->preroll_seek);
 
     if (p->audio_active && p->separate_audio)
-        demux_seek(&p->demux_audio, target_us);
+        demux_seek(&p->demux_audio, target_us, p->preroll_seek);
     vdec_flush(&p->vdec);
 
     vdec_set_seek_target(&p->vdec, target_us);
@@ -828,6 +835,7 @@ static int player_open(PlayerContext *p, const char *path,
     p->image_duration_us = (int64_t)(opt->image_duration_s * 1000000.0);
     p->drm_ctx           = drm;
     p->loop_seamless     = opt->loop_seamless;
+    p->preroll_seek      = opt->preroll_seek;
 
     if (playlist_open(&p->playlist, path, path_audio,
                       opt->loop, opt->shuffle, opt->recurse, opt->yt_quality) < 0)
