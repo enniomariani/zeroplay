@@ -725,8 +725,8 @@ static void player_seek(PlayerContext *p, int64_t target_us)
 {
     if (!p->pipeline_open) return;
 
-    /* Seamless loop: a seek to the end means "start over"*/
-    if (p->loop_seamless && p->duration_us > 0 && target_us >= p->duration_us)
+    /* Loop / Seamless loop: a seek to the end means "start over"*/
+    if ((p->loop || p->loop_seamless) && p->duration_us > 0 && target_us >= p->duration_us)
         target_us = 0;
 
     fprintf(stderr, "zeroplay[%d]: seeking to %.1fs...\n",
