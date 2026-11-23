@@ -1456,7 +1456,8 @@ static int run_control_mode(Options *opt)
             /* target frame is on screen, the seek is complete */
             if (frame->seek_result) {
                 p->seek_pending = 0;
-                printf("seeked %lld\n", (long long)(frame->pts_us / 1000));
+                printf("seeked %lld\n",
+                       (long long)((frame->pts_us - p->vdec.stream_start_us) / 1000));
                 fflush(stdout);
             }
 
