@@ -1067,7 +1067,7 @@ static int run_ws_mode(Options *opt)
 
         frame = skip_late_frames(p);
 
-        p->current_pts = frame->pts_us;
+        p->current_pts = frame->pts_us - p->vdec.stream_start_us;
         ws_shared_state_set_position(&shared, frame->pts_us / 1e6);
 
         if (p->sub_active) {
@@ -1436,7 +1436,7 @@ static int run_control_mode(Options *opt)
 
         frame = skip_late_frames(p);
 
-        p->current_pts = frame->pts_us;
+        p->current_pts = frame->pts_us - p->vdec.stream_start_us;
 
         if (p->sub_active) {
             const char *sub = subtitle_get_active(&p->sub, p->current_pts);
@@ -1738,7 +1738,7 @@ int main(int argc, char *argv[])
 
             frame = skip_late_frames(p);
 
-            p->current_pts = frame->pts_us;
+            p->current_pts = frame->pts_us - p->vdec.stream_start_us;
 
             if (p->sub_active) {
                 const char *sub = subtitle_get_active(&p->sub, p->current_pts);
