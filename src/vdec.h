@@ -72,9 +72,10 @@ typedef struct {
     double            video_time_base;
     double            audio_time_base;
 
-    int64_t        seek_target;    /* same units as DecodedFrame.pts_us */
-    int            seek_pending;   /* only touched by the vdec thread / before it starts */
-    DecodedFrame  *seek_cand;      /* best frame with pts <= target so far */
+    int64_t        seek_target;             /* same units as DecodedFrame.pts_us */
+    int            seek_pending;            /* only touched by the vdec thread / before it starts */
+    int64_t        stream_start_us;         /* raw→file-relative offset, video stream */
+    DecodedFrame  *seek_cand;               /* best frame with pts <= target so far */
 } VdecContext;
 
 int  vdec_open(VdecContext *ctx, AVStream *stream,

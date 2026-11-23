@@ -359,6 +359,11 @@ int vdec_open(VdecContext *ctx, AVStream *stream,
         ctx->sar_den = 1;
     }
 
+    ctx->stream_start_us = 0;
+    if (stream->start_time != AV_NOPTS_VALUE && stream->start_time > 0)
+        ctx->stream_start_us = av_rescale_q(stream->start_time, stream->time_base,
+                                            (AVRational){1, 1000000});
+
     for (int i = 0; i < VDEC_CAPTURE_BUFS; i++)
         ctx->cap_dmabuf_fd[i] = -1;
 
@@ -680,10 +685,11 @@ void vdec_run(VdecContext *ctx)
                         frame->seek_result = 0;
 
                         if (ctx->seek_pending) {
-                            if (frame->pts_us <= ctx->seek_target) {
+                            if (frame->pts_us - ctx->stream_start_us <= ctx->seek_target) {
                                 /* Before/at target: keep only the newest such frame.
                                  * The > check keeps this correct even if the firmware
                                  * hands frames back slightly out of order. */
+
                                 if (!ctx->seek_cand || frame->pts_us > ctx->seek_cand->pts_us) {
                                     if (ctx->seek_cand) vdec_requeue_frame(ctx, ctx->seek_cand);
                                     ctx->seek_cand = frame;

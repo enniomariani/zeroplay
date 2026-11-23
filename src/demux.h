@@ -19,6 +19,8 @@ typedef struct {
 
     int64_t         seek_drop_audio_before_us;
     int64_t         seek_drop_subs_before_us;
+    int64_t         audio_start_us;    /* raw→file-relative offset, audio stream */
+    int64_t         subs_start_us;     /* same, subtitle stream */
     AVRational      audio_tb;
     AVRational      subs_tb;
 
@@ -35,6 +37,7 @@ int  demux_seek(DemuxContext *ctx, int64_t target_us);
 int  demux_next_chapter(DemuxContext *ctx, int64_t current_us, int64_t *target_us);
 int  demux_prev_chapter(DemuxContext *ctx, int64_t current_us, int64_t *target_us);
 int  demux_has_subtitles(DemuxContext *ctx);  /* 1 if embedded subtitle stream found */
+int64_t demux_stream_start_us(const AVStream *st, const AVFormatContext *fmt);
 void demux_close(DemuxContext *ctx);
 
 #endif

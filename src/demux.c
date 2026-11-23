@@ -222,6 +222,19 @@ static double stream_duration_sec(AVFormatContext *fmt, int idx)
     return -1;
 }
 
+/* How far this stream's raw PTS timeline is ahead of the file-relative
+ * (AV_TIME_BASE) timeline — MPEG-TS/HLS start their PTS above 0. Falls
+ * back to the container start time when the stream leaves it unset. */
+int64_t demux_stream_start_us(const AVStream *st, const AVFormatContext *fmt)
+{
+    if (st && st->start_time != AV_NOPTS_VALUE && st->start_time > 0)
+        return av_rescale_q(st->start_time, st->time_base,
+                            (AVRational){1, 1000000});
+    if (fmt->start_time != AV_NOPTS_VALUE && fmt->start_time > 0)
+        return fmt->start_time;              /* AV_TIME_BASE == µs */
+    return 0;
+}
+
 int demux_init_seamless(DemuxContext *ctx)
 {
     double video_loop_sec = -1;
@@ -321,11 +334,19 @@ void demux_run(DemuxContext *ctx)
     int video_done = 0;
     int audio_done = (ctx->audio_stream_idx == -1); // no audio stream = done
 
-    if(ctx->audio_stream_idx != -1)
-        ctx->audio_tb = ctx->fmt_ctx->streams[ctx->audio_stream_idx]->time_base;
+    if(ctx->audio_stream_idx != -1) {
+        ctx->audio_tb       = ctx->fmt_ctx->streams[ctx->audio_stream_idx]->time_base;
+        ctx->audio_start_us = demux_stream_start_us(
+                                  ctx->fmt_ctx->streams[ctx->audio_stream_idx],
+                                  ctx->fmt_ctx);
+    }
 
-    if(ctx->subtitle_stream_idx != -1)
-        ctx->subs_tb = ctx->fmt_ctx->streams[ctx->subtitle_stream_idx]->time_base;
+    if(ctx->subtitle_stream_idx != -1) {
+        ctx->subs_tb       = ctx->fmt_ctx->streams[ctx->subtitle_stream_idx]->time_base;
+        ctx->subs_start_us = demux_stream_start_us(
+                                 ctx->fmt_ctx->streams[ctx->subtitle_stream_idx],
+                                 ctx->fmt_ctx);
+    }
 
     AVPacket *pkt = av_packet_alloc();
 
@@ -405,12 +426,14 @@ void demux_run(DemuxContext *ctx)
             if (ctx->seek_drop_audio_before_us >= 0) {
                 int64_t ts = (pkt->pts != AV_NOPTS_VALUE) ? pkt->pts : pkt->dts;
                 if (ts != AV_NOPTS_VALUE) {
+                    /* ts is raw stream time; the armed target is
+                     * file-relative — align the domains first */
                     int64_t end_us = av_rescale_q(ts + pkt->duration,
                                                   ctx->audio_tb,
-                                                  (AVRational){1, 1000000});
+                                                  (AVRational){1, 1000000}) - ctx->audio_start_us;
 
                     if (end_us <= ctx->seek_drop_audio_before_us) {
-                        av_packet_unref(pkt);   /* entirely before the target: drop */
+                        av_packet_unref(pkt);
                         continue;
                     }
                 }
@@ -460,8 +483,14 @@ void demux_run(DemuxContext *ctx)
            if (ctx->seek_drop_subs_before_us >= 0) {
                int64_t ts = (pkt->pts != AV_NOPTS_VALUE) ? pkt->pts : pkt->dts;
                 if (ts != AV_NOPTS_VALUE && ctx->subs_tb.den > 0 && pkt->duration > 0) {
-                    int64_t end_us = av_rescale_q(ts + pkt->duration, ctx->subs_tb,
-                                                  (AVRational){1, 1000000});
+
+                    /* ts is raw stream time; the armed target is
+                     * file-relative — align the domains first */
+                    int64_t end_us = av_rescale_q(ts + pkt->duration,
+                                                  ctx->subs_tb,
+                                                  (AVRational){1, 1000000})
+                                   - ctx->subs_start_us;
+
                     if (end_us <= ctx->seek_drop_subs_before_us) {
                         av_packet_unref(pkt);   /* ended before the target */
                         continue;
