@@ -253,29 +253,30 @@ void vdec_set_seek_target(VdecContext *ctx, int64_t target_us)
 
 static int vdec_emit(VdecContext *ctx, DecodedFrame *frame)
 {
-        if (!frame->seek_result && ctx->audio_pts) {
-            int64_t video_pts = frame->pts_us;
-            int64_t last_audio = *ctx->audio_pts;
-            int    stall_iters = 0;
-            double delta;
-            int first_iter = 1;
-            do {
-                delta = -(*ctx->audio_pts * ctx->audio_time_base
-                          - video_pts * ctx->video_time_base);
-                if (first_iter) {
-                    first_iter = 0;
-                    if (delta < VIDEO_AUDIO_DESYNC_THRESHOLD_MAX) break;
-                }
-                usleep(VIDEO_AUDIO_DESYNC_EPSILON * 1000000.0);
-                if (*ctx->audio_pts == last_audio) {
-                    if (++stall_iters >= 20) break;   /* audio clock idle ~200ms: paused */
-                    continue;
-                }
-                stall_iters = 0;
-                last_audio = *ctx->audio_pts;
-            } while (!ctx->packet_queue->closed &&
-                     (delta > VIDEO_AUDIO_DESYNC_THRESHOLD_MIN));
-        }
+    if (!frame->seek_result && ctx->audio_pts) {
+        int64_t video_pts = frame->pts_us;
+        int64_t last_audio = *ctx->audio_pts;
+        int    stall_iters = 0;
+        double delta;
+        int first_iter = 1;
+        do {
+            delta = -(*ctx->audio_pts * ctx->audio_time_base
+                      - video_pts * ctx->video_time_base);
+            if (first_iter) {
+                first_iter = 0;
+                if (delta < VIDEO_AUDIO_DESYNC_THRESHOLD_MAX) break;
+            }
+            usleep(VIDEO_AUDIO_DESYNC_EPSILON * 1000000.0);
+            if (*ctx->audio_pts == last_audio) {
+                if (++stall_iters >= 20) break;   /* audio clock idle ~200ms: paused */
+                continue;
+            }
+            stall_iters = 0;
+            last_audio = *ctx->audio_pts;
+        } while (!ctx->packet_queue->closed &&
+                 (delta > VIDEO_AUDIO_DESYNC_THRESHOLD_MIN));
+    }
+    return queue_push(ctx->frame_queue, frame);
 }
 
 /* EOS (or abort) while still hunting for the target: show the last frame we have. */
