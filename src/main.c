@@ -725,8 +725,6 @@ static void player_seek(PlayerContext *p, int64_t target_us)
 {
     if (!p->pipeline_open) return;
 
-    fprintf(stderr, "zeroplay: seek-debug: %.1f / %.1f", p->duration_us, target_us);
-
     /* Seamless loop: a seek to the end means "start over"*/
     if (p->loop_seamless && p->duration_us > 0 && target_us >= p->duration_us)
         target_us = 0;
