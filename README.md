@@ -125,6 +125,7 @@ Each path can be a video file, image, `.txt`/`.m3u` playlist, directory, URL, or
 | `--hls-bitrate bps` | Cap HLS variant bitrate in bps (or `HLS_MAX_BANDWIDTH` env) |
 | `--yt-quality n` | YouTube stream height: 360, 480, 720, 1080 (default: 480) |
 | `--image-duration n` | Seconds per image (default: 10, 0 = hold forever) |
+| `--preroll-seek n` | Seconds to preroll seek command. Used to ensure frame-accurate seek for HLS/TS. Makes seek slower. |
 | `--spi-fill` | SPI/DBI panel: crop video to fill instead of the default letterboxed fit — see [SPI/DBI Panels](#spidbi-panels) |
 | `--verbose` | Print decoder and driver info |
 | `--help` | Show usage |

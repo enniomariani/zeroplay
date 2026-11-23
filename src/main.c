@@ -91,7 +91,7 @@ static void print_usage(void)
         "  --yt-quality n          YouTube stream height cap (default: 480)\n"
         "                          e.g. 360, 480, 720, 1080 (requires yt-dlp)\n"
         "  --image-duration n      seconds per image (default 10, 0 = hold forever)\n"
-        "  --preroll-seek n        seconds to preroll seek command. Used to ensure frame-accurate seek for MPEG TS\n"
+        "  --preroll-seek n        seconds to preroll seek command. Used to ensure frame-accurate seek for HLS/TS\n"
         "  --spi-fill              SPI/DBI panel: crop video to fill (default: fit with bars)\n"
         "  --verbose               print decoder/driver info\n"
         "  --help                  show this message\n"
