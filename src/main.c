@@ -142,7 +142,7 @@ static int parse_args(int argc, char *argv[], Options *opt)
         { "audio-device",     required_argument, NULL, 'a' },
         { "sub",              required_argument, NULL, 's' },
         { "image-duration",   required_argument, NULL, 'd' },
-        { "preroll-seek",     no_argument,       NULL, 'P' },
+        { "preroll-seek",     required_argument, NULL, 'P' },
         { "spi-fill",         no_argument,       NULL, 'F' },
         { "verbose",          no_argument,       NULL, 'V' },
         { "control",          no_argument,       NULL, 'C' },
