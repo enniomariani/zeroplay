@@ -286,7 +286,7 @@ static void vdec_finish_seek(VdecContext *ctx)
         DecodedFrame *frame = ctx->seek_cand;
         ctx->seek_cand = NULL;
         frame->seek_result = 1;
-        if (!vdec_emit(ctx, frame)) free(c);
+        if (!vdec_emit(ctx, frame)) free(frame);
     }
     ctx->seek_pending = 0;
 }
