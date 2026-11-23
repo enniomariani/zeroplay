@@ -724,6 +724,13 @@ static int player_open_video(PlayerContext *p, const char *filename,
 static void player_seek(PlayerContext *p, int64_t target_us)
 {
     if (!p->pipeline_open) return;
+
+    fprintf(stderr, "zeroplay: seek-debug: %.1f / %.1f", p->duration_us, target_us);
+
+    /* Seamless loop: a seek to the end means "start over"*/
+    if (p->loop_seamless && p->duration_us > 0 && target_us >= p->duration_us)
+        target_us = 0;
+
     fprintf(stderr, "zeroplay[%d]: seeking to %.1fs...\n",
             p->output_idx, target_us / 1e6);
 
@@ -732,11 +739,6 @@ static void player_seek(PlayerContext *p, int64_t target_us)
 
     player_threads_stop(p);
     demux_seek(&p->demux, target_us);
-
-    /* Seamless loop: a seek to the end means "start over". Remap here so
-     * demuxer, vdec filter and audio drop all use the same target. */
-    if (p->loop_seamless && p->duration_us > 0 && target_us >= p->duration_us)
-        target_us = 0;
 
     if (p->audio_active && p->separate_audio)
         demux_seek(&p->demux_audio, target_us);
