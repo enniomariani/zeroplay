@@ -844,6 +844,7 @@ static int player_open(PlayerContext *p, const char *path,
     p->image_duration_us = (int64_t)(opt->image_duration_s * 1000000.0);
     p->drm_ctx           = drm;
     p->loop_seamless     = opt->loop_seamless;
+    p->loop              = opt->loop;
     p->preroll_seek      = opt->preroll_seek;
 
     if (playlist_open(&p->playlist, path, path_audio,
