@@ -1052,7 +1052,7 @@ static int run_ws_mode(Options *opt)
             }
         }
 
-        if (!player.pipeline_open) { sleep_us(50000); continue; }
+        if ( !player.pipeline_open) { sleep_us(50000); continue; }
         if (paused && !player.seek_pending) { sleep_us(10000); continue; }
 
         PlayerContext *p = &player;
@@ -1100,6 +1100,11 @@ static int run_ws_mode(Options *opt)
 
         if (due <= now) {
             drm_present(&drm, 0, frame);
+            if (frame->seek_result) {
+                p->seek_pending = 0;
+                ws_shared_state_set_position(&shared,
+                    (frame->pts_us - p->vdec.stream_start_us) / 1e6);
+            }
             if (!audio_started && p->audio_active && !paused) {
                 audio_resume(&p->audio);
                 audio_started = 1;
