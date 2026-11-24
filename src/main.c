@@ -201,6 +201,10 @@ static int parse_args(int argc, char *argv[], Options *opt)
         if (!ad) ad = getenv("MPV_AUDIO_DEVICE");
         if (ad && strcmp(ad, "auto") != 0) opt->audio_device = ad;
     }
+    if (opt->preroll_seek < -1) {
+        fprintf(stderr, "zeroplay: option preroll-seek has to be >= -1. Preroll is disabled.\n");
+        opt->preroll_seek = -1;
+    }
 #ifdef HAVE_WEBSOCKET
     if (!opt->ws_url)       opt->ws_url = getenv("BACKEND_WS_URL");
     if (!opt->device_token) opt->device_token = getenv("DEVICE_TOKEN");
