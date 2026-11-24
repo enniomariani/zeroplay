@@ -965,6 +965,7 @@ static int run_ws_mode(Options *opt)
     player.no_audio   = opt->no_audio;
     player.no_downmix = opt->no_downmix;
     player.loop_seamless   = opt->loop_seamless;
+    player.loop = opt->loop;
 
     int paused = 0;
     int audio_started = 0;
@@ -1209,6 +1210,7 @@ static int run_control_mode(Options *opt)
     player.drm_ctx           = &drm;
     player.image_duration_us = (int64_t)(opt->image_duration_s * 1000000.0);
     player.loop_seamless     = opt->loop_seamless;
+    player.loop              = opt->loop;
 
     /* ExternalPlayer Menu OSD: drawn by the existing DRM subtitle overlay. */
     char osd_text[1024] = "";
