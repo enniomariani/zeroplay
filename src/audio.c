@@ -300,7 +300,7 @@ static int audio_reopen_alsa(AudioContext *ctx)
 
 int audio_open(AudioContext *ctx, AVStream *stream,
                const char *device, Queue *audio_queue,
-               int no_downmix)
+               int no_downmix, int64_t stream_start_us)
 {
     memset(ctx, 0, sizeof(*ctx));
 
@@ -317,6 +317,8 @@ int audio_open(AudioContext *ctx, AVStream *stream,
 
     ctx->video_pts      = NULL;
     ctx->audio_pts      = 0;
+
+    ctx->stream_start_us = stream_start_us;
 
     pthread_mutex_init(&ctx->pause_mutex, NULL);
     pthread_cond_init(&ctx->pause_cond, NULL);
@@ -626,20 +628,27 @@ void audio_run(AudioContext *ctx)
         if (ctx->video_pts) {
             int64_t audio_pts = pkt->pts;
 
+            /* audio pkt pts is in the stream's raw time base — convert to µs and
+             * shift to file-relative, so the domain matches p->current_pts */
+            int64_t audio_start_us = av_rescale_q(audio_pts, ctx->time_base,
+                                                  (AVRational){1, 1000000})
+                                   - ctx->stream_start_us;
+
             double delta;
             int first_iter = 1;
             do {
-                delta = audio_pts * ctx->audio_time_base - *ctx->video_pts * ctx->video_time_base;
+                delta = audio_start_us * ctx->video_time_base        /* µs → s */
+                      - *ctx->video_pts        * ctx->video_time_base;
 
                 if (first_iter) {
                     first_iter = 0;
                     if (delta < VIDEO_AUDIO_DESYNC_THRESHOLD_MAX) break;
                 }
-
                 usleep(VIDEO_AUDIO_DESYNC_EPSILON * 1000000.0);
-            } while (!ctx->audio_queue->closed && (delta > VIDEO_AUDIO_DESYNC_THRESHOLD_MIN));
+            } while (!ctx->audio_queue->closed &&
+                     (delta > VIDEO_AUDIO_DESYNC_THRESHOLD_MIN));
 
-            ctx->audio_pts = audio_pts;
+            ctx->audio_pts = audio_pts;   /* stays RAW — vdec_emit pairs raw vs raw */
         }
 
         if (avcodec_send_packet(ctx->codec_ctx, pkt) < 0) {

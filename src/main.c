@@ -649,7 +649,8 @@ static int player_open_video(PlayerContext *p, const char *filename,
     AVStream *video_stream =
         p->demux.fmt_ctx->streams[p->demux.video_stream_idx];
 
-    if (vdec_open(&p->vdec, video_stream, &p->video_queue, &p->frame_queue) < 0)
+    if (vdec_open(&p->vdec, video_stream, &p->video_queue, &p->frame_queue,
+        demux_stream_start_us(video_stream, p->demux.fmt_ctx)) < 0)
         return -1;
 
     p->audio_active = 0;
@@ -666,23 +667,27 @@ static int player_open_video(PlayerContext *p, const char *filename,
         if (audio_stream && (audio_open(&p->audio, audio_stream,
                                          opt->audio_device,
                                          &p->audio_queue,
-                                         p->no_downmix) == 0)) {
+                                         p->no_downmix,
+                                         demux_stream_start_us(audio_stream,
+                                          p->separate_audio
+                                              ? p->demux_audio.fmt_ctx
+                                              : p->demux.fmt_ctx)) == 0)) {
             p->audio.volume = opt->vol / 100.0f;
             p->audio_active = 1;
 
-            if (p->separate_audio) {
-                p->vdec.audio_pts       = &p->audio.audio_pts;
-                p->vdec.video_time_base = 1.0 / 1000000LL;
-                p->vdec.audio_time_base = av_q2d(
-                    p->demux_audio.fmt_ctx->streams[
-                        p->demux_audio.audio_stream_idx]->time_base);
+            /* Wire A/V sync gates for BOTH embedded and external audio.
+             * After a seek, the audio side (audio_run's "block while ahead
+             * of video") holds playback until the video pipeline has decoded
+             * to the exact seek target and current_pts is updated — without
+             * this, audio starts playing at the target while video is still
+             * decoding from the landing keyframe. */
+            p->vdec.audio_pts       = &p->audio.audio_pts;
+            p->vdec.video_time_base = 1.0 / 1000000LL;
+            p->vdec.audio_time_base = av_q2d(audio_stream->time_base);
 
-                p->audio.video_pts       = &p->current_pts;
-                p->audio.video_time_base = 1.0 / 1000000LL;
-                p->audio.audio_time_base = av_q2d(
-                    p->demux_audio.fmt_ctx->streams[
-                        p->demux_audio.audio_stream_idx]->time_base);
-            }
+            p->audio.video_pts       = &p->current_pts;
+            p->audio.video_time_base = 1.0 / 1000000LL;
+            p->audio.audio_time_base = av_q2d(audio_stream->time_base);
         }
     }
 

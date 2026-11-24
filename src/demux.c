@@ -426,13 +426,11 @@ void demux_run(DemuxContext *ctx)
             if (ctx->seek_drop_audio_before_us >= 0) {
                 int64_t ts = (pkt->pts != AV_NOPTS_VALUE) ? pkt->pts : pkt->dts;
                 if (ts != AV_NOPTS_VALUE) {
-                    /* ts is raw stream time; the armed target is
-                     * file-relative — align the domains first */
-                    int64_t end_us = av_rescale_q(ts + pkt->duration,
+                    int64_t start_us = av_rescale_q(ts,
                                                   ctx->audio_tb,
                                                   (AVRational){1, 1000000}) - ctx->audio_start_us;
 
-                    if (end_us <= ctx->seek_drop_audio_before_us) {
+                    if (start_us < ctx->seek_drop_audio_before_us) {
                         av_packet_unref(pkt);
                         continue;
                     }

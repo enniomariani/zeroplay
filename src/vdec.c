@@ -340,7 +340,7 @@ static int feed_packet(VdecContext *ctx, int buf_idx, AVPacket *pkt)
 /* ------------------------------------------------------------------ */
 
 int vdec_open(VdecContext *ctx, AVStream *stream,
-              Queue *packet_queue, Queue *frame_queue)
+              Queue *packet_queue, Queue *frame_queue, int64_t stream_start_us)
 {
     memset(ctx, 0, sizeof(*ctx));
     ctx->packet_queue  = packet_queue;
@@ -359,10 +359,7 @@ int vdec_open(VdecContext *ctx, AVStream *stream,
         ctx->sar_den = 1;
     }
 
-    ctx->stream_start_us = 0;
-    if (stream->start_time != AV_NOPTS_VALUE && stream->start_time > 0)
-        ctx->stream_start_us = av_rescale_q(stream->start_time, stream->time_base,
-                                            (AVRational){1, 1000000});
+    ctx->stream_start_us = stream_start_us;
 
     for (int i = 0; i < VDEC_CAPTURE_BUFS; i++)
         ctx->cap_dmabuf_fd[i] = -1;

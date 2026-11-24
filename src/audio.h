@@ -51,16 +51,17 @@ typedef struct {
      * whatever is still queued. Cleared when audio_run() starts. */
     volatile int     aborting;
 
-    /* Sync with video if separate */
+    /* Sync with video if necessary */
+    int64_t           stream_start_us;  /* raw→file-relative offset (µs), audio stream */
     volatile int64_t *video_pts;
     int64_t           audio_pts;
     double            video_time_base;
     double            audio_time_base;
 } AudioContext;
 
-int       audio_open(AudioContext *ctx, AVStream *stream,
-                     const char *device, Queue *audio_queue,
-                     int no_downmix);
+int audio_open(AudioContext *ctx, AVStream *stream,
+                             const char *device, Queue *queue,
+                             int no_downmix, int64_t stream_start_us);
 void      audio_run(AudioContext *ctx);
 long long audio_get_clock_us(AudioContext *ctx);
 void      audio_pause(AudioContext *ctx);

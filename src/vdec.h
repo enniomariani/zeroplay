@@ -79,7 +79,7 @@ typedef struct {
 } VdecContext;
 
 int  vdec_open(VdecContext *ctx, AVStream *stream,
-               Queue *packet_queue, Queue *frame_queue);
+               Queue *packet_queue, Queue *frame_queue, int64_t stream_start_us);
 void vdec_run(VdecContext *ctx);
 void vdec_set_seek_target(VdecContext *ctx, int64_t target_us);
 int  vdec_flush(VdecContext *ctx);   /* call after seek, before restart */
