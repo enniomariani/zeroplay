@@ -1040,7 +1040,7 @@ static int run_ws_mode(Options *opt)
                     player_seek(&player, target_us);
                     player.current_pts = target_us;
                     ws_shared_state_set_position(&shared,
-                        (target_us - p->vdec.stream_start_us) / 1e6);
+                        (target_us - player.vdec.stream_start_us) / 1e6);
                     if (was_paused) {
                         paused = 1;
                         if (player.audio_active)
